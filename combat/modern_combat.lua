@@ -279,6 +279,37 @@ return function(mod)
   -- one-entry-per-move shape these moves actually need -- no move in
   -- this batch has more than one power-override source.
   local powerOverrides = {} -- { [moveId] = fn(ctx) -> integer power }
+
+  -- Moves that return a finished damage number from their own branch inside
+  -- computeModernDamage rather than scaling a power. They have no entry in
+  -- powerOverrides by design, so the zero-power gate has to be told about
+  -- them separately or their branch is unreachable.
+  local COMPUTES_OWN_DAMAGE = { ENDEAVOR = true }
+
+  -- What a computed-power move falls back to when its formula CANNOT answer.
+  --
+  -- An override returns nil when an input it needs is missing, and the old
+  -- fallback was `or move.power` -- which for exactly these moves is 0,
+  -- because PokeAPI reports no power for them. So "the data was missing"
+  -- silently became "the move does nothing", which is the failure mode this
+  -- whole area keeps producing.
+  --
+  -- It is not hypothetical: speciesWeightOf reads dexEntry.weightKg, and
+  -- national_dex only attaches a dexEntry to species it REGISTERS. The
+  -- original 251 arrive through its `patch` bucket with no dexEntry at all,
+  -- so Heavy Slam or Heat Crash aimed at any cart Pokemon had no target
+  -- weight, no ratio, and no damage. Reported from a real game: Bastiodon's
+  -- Heavy Slam "did not do anything".
+  --
+  -- These are each move's real-world average power, so a mon with no weight
+  -- data plays as an ordinary move of its own tier rather than a dud. A
+  -- number here is a LAST RESORT and never preferred over a real formula.
+  local FALLBACK_POWER = {
+    HEAVYSLAM = 100, HEATCRASH = 80, GRASSKNOT = 60, LOWKICK = 50,
+    GYROBALL = 80, ELECTROBALL = 80, CRUSHGRIP = 80, WRINGOUT = 80,
+    HARDPRESS = 80, PUNISHMENT = 100, FLING = 30, TRUMPCARD = 80,
+    SPITUP = 100, METALBURST = 70,
+  }
   local function registerPowerOverride(moveId, fn)
     assert(type(moveId) == "string" and moveId ~= "", "power override move id is required")
     assert(type(fn) == "function", "power override must be a function")
@@ -889,6 +920,44 @@ return function(mod)
     return 20 + 20 * total
   end)
 
+  -- ---------------------------------------------------------------
+  -- The rest of the variable-power roster.
+  --
+  -- These six had no override at all, so they fell through to a stored
+  -- power of 0 and dealt nothing. Every input below is an existing,
+  -- already-exported primitive -- no new plumbing.
+  -- ---------------------------------------------------------------
+
+  -- Crush Grip and Wring Out: power falls with the TARGET's remaining HP.
+  -- One function for both, the same way flailPower serves Flail and
+  -- Reversal -- two copies of one formula is two chances to drift.
+  local function targetHpFractionPower(scale)
+    return function(ctx)
+      local hp, maxHp = currentAndMaxHP(ctx.target, ctx.gen2)
+      if not (hp and maxHp) or maxHp <= 0 then return 1 end
+      return math.max(1, math.floor(scale * hp / maxHp))
+    end
+  end
+  registerPowerOverride("CRUSHGRIP", targetHpFractionPower(120))
+  registerPowerOverride("WRINGOUT", targetHpFractionPower(120))
+  -- Hard Press is the same shape on a 100 scale.
+  registerPowerOverride("HARDPRESS", targetHpFractionPower(100))
+
+  -- Punishment: harder the more the TARGET has buffed itself. Power Trip
+  -- above is the same idea pointed at the user, and carries the same honest
+  -- limitation -- stagesFor only tracks atk/def/spa/spd, so a target that
+  -- raised only Speed, accuracy or evasion reads as +0 here. Flagged rather
+  -- than passed off as complete, exactly as Power Trip's own header does.
+  registerPowerOverride("PUNISHMENT", function(ctx)
+    local stages = stagesFor(ctx.battle,
+      sideOfWho(ctx.battle, ctx.target, ctx.gen2)) or {}
+    local total = 0
+    for _, key in ipairs({ "attack", "defense", "spa", "spd" }) do
+      total = total + math.max(0, stages[key] or 0)
+    end
+    return math.min(200, 60 + 20 * total)
+  end)
+
   local function displayNameFor(battle, who, gen2)
     if gen2 then
       local nm = battle:monName(who)
@@ -915,6 +984,37 @@ return function(mod)
   local function rawStat(who, key, gen2)
     return gen2 and who.stats[key] or who.curStats[key]
   end
+
+  -- Registered HERE, below rawStat, and not beside the other power
+  -- overrides above it: these two are the only ones that read a raw
+  -- stat, and a local named above its definition is not that local --
+  -- Lua compiles it to a global, nil at runtime. The suite's own
+  -- bytecode lint caught exactly that on the first attempt.
+  -- Gyro Ball: the SLOWER the user, the harder it hits.
+  -- min(150, floor(25 * targetSpeed / userSpeed) + 1). Guarded against a
+  -- zero/absent user Speed, which would otherwise divide by zero and hand
+  -- the damage formula a nan.
+  registerPowerOverride("GYROBALL", function(ctx)
+    local userSpeed = rawStat(ctx.user, "speed", ctx.gen2) or 0
+    local targetSpeed = rawStat(ctx.target, "speed", ctx.gen2) or 0
+    if userSpeed <= 0 then return 150 end
+    return math.min(150, math.floor(25 * targetSpeed / userSpeed) + 1)
+  end)
+
+  -- Electro Ball: the mirror image -- the FASTER the user, the harder it
+  -- hits -- and a tier table rather than a continuous ratio.
+  registerPowerOverride("ELECTROBALL", function(ctx)
+    local userSpeed = rawStat(ctx.user, "speed", ctx.gen2) or 0
+    local targetSpeed = rawStat(ctx.target, "speed", ctx.gen2) or 0
+    if targetSpeed <= 0 then return 150 end
+    local ratio = userSpeed / targetSpeed
+    if ratio >= 4 then return 150
+    elseif ratio >= 3 then return 120
+    elseif ratio >= 2 then return 80
+    elseif ratio >= 1 then return 60
+    else return 40 end
+  end)
+
   -- Exported (Phase 8, other bucket): Download/Beast Boost's own real
   -- "compare/find the highest raw stat" both need this same accessor
   -- the damage formula itself already uses -- "attack"/"defense"/"spa"/
@@ -1342,13 +1442,39 @@ return function(mod)
   local function computeModernDamage(ctx)
     local user, target, move, opts, rng = ctx.user, ctx.target, ctx.move, ctx.opts or {}, ctx.rng
 
+
     -- MoveCategory.of returns capitalized "Physical"/"Special"/"Status" --
     -- deliberately NOT the lowercase move.category some data carries
     -- (Damage.lua's own internal categoryOf compares lowercase; these are
     -- two different casing conventions coexisting in this codebase
     -- depending on data origin, so always go through MoveCategory.of).
     local category = MoveCategory.of(move) or "Physical"
-    if (move.power or 0) == 0 or category == "Status" then
+    -- A COMPUTED power is not an absent one.
+    --
+    -- This bail used to read `(move.power or 0) == 0`, full stop -- and it
+    -- runs ~200 lines before powerOverrides is consulted, so a move whose
+    -- power is DERIVED (Heavy Slam, Grass Knot, Trump Card, Spit Up, Fling,
+    -- Low Kick...) returned 0 here and its already-written override never
+    -- fired. Every one of those handlers existed and none of them ran.
+    --
+    -- It surfaced because PokeAPI reports `power: null` for exactly these
+    -- moves -- the power is computed, so there is no number to report -- and
+    -- national_dex faithfully writes 0. The base game distinguishes the two
+    -- cases with a placeholder of 1 (its own NIGHT_SHADE, COUNTER and
+    -- REVERSAL records all ship `power = 1`), but this engine should not
+    -- depend on every data source knowing that convention: if a move has a
+    -- registered override, the override IS its power, and a stored 0 is
+    -- simply the absence of a stored number.
+    --
+    -- Status still bails unconditionally: an override cannot make a status
+    -- move deal damage, and nothing registers one for a status move.
+    -- ENDEAVOR does not scale a power at all -- it returns a flat HP
+    -- difference from its own branch below -- so it has no override to find
+    -- and still must not be turned away here. Its own comment below already calls
+    -- power=1 "that convention's placeholder for computed at runtime".
+    local hasComputedPower = powerOverrides[move.id] ~= nil
+      or COMPUTES_OWN_DAMAGE[move.id]
+    if category == "Status" or ((move.power or 0) == 0 and not hasComputedPower) then
       return 0, { crit = false, typeMult = 10 }
     end
 
@@ -1576,9 +1702,24 @@ return function(mod)
     -- nil override (species weight data missing, etc.) falls back to
     -- the move's own plain declared power unchanged.
     local override = powerOverrides[move.id]
-    local power = (override and override({
+    local computed = override and override({
       battle = ctx.battle, user = user, target = target, gen2 = gen2,
-    })) or move.power
+    })
+    -- `or move.power` alone is a trap here: for a computed-power move that
+    -- stored power is 0, so a formula that could not answer produced a move
+    -- that did nothing at all. See FALLBACK_POWER's own header.
+    -- The fallback is keyed on the OVERRIDE failing, not on the stored power
+    -- being 0. Those were the same thing only while national_dex emitted 0;
+    -- it now emits 1 (the base game's own placeholder for "computed at
+    -- runtime"), so `power <= 0` stopped catching anything and a formula that
+    -- could not answer silently left the move at power 1 -- which is not
+    -- "nothing" any more, it is a Heavy Slam that tickles. Measured against a
+    -- level 2 Pidgey: 986 damage at the real power 120, 10 at power 1.
+    local power = computed or move.power
+    if override and not computed then
+      power = FALLBACK_POWER[move.id] or power
+    end
+
     local d = math.floor(math.floor(2 * level / 5) + 2)
     d = math.floor(math.floor(d * power * atk / math.max(1, dfn)) / 50) + 2
 

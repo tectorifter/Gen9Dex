@@ -41,6 +41,15 @@ return function(mod, GimmickRing)
   -- whole function silently returned here forever. Now only the
   -- genuinely Gen 1-BattleState-specific method patches below are
   -- skipped on a repeat pass.
+  -- Declared HERE, above every `if not skipGen1` block, because two of them
+  -- need it and they are SIBLINGS: it is assigned in the turn-resolution
+  -- block and called again from the update loop, and a local declared in the
+  -- first is invisible to the second. Lua compiles that second use to a
+  -- GLOBAL read -- nil, and it raises only when reached, which is the moment
+  -- a Dynamax grow sequence finishes and the held turn is finally resolved.
+  -- The symptom is a Max Move that plays its whole grow animation and then
+  -- does nothing at all.
+  local vanillaResolveTurn
   local skipGen1 = BattleState.__galarGigantamaxWrapped == true
   if not skipGen1 then
     BattleState.__galarGigantamaxWrapped = true
@@ -598,7 +607,7 @@ return function(mod, GimmickRing)
   -- resolves once that sequence finishes, from the update loop below, so
   -- the player watches the full grow-in before their Max Move plays out.
   -- =====================================================================
-  local vanillaResolveTurn = BattleState.resolveTurn
+  vanillaResolveTurn = BattleState.resolveTurn
   function BattleState:resolveTurn(playerAction)
     if hasPreparedMaxMove(self, playerAction) then
       if beginGigantamaxSequence(self, playerAction) then

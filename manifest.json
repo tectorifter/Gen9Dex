@@ -1,7 +1,7 @@
 {
   "id": "g9-battle-engine-beta",
   "name": "g9-battle-engine-beta",
-  "version": "2.0.2",
+  "version": "2.0.7",
   "api": 2,
   "entry": "main.lua",
   "profile": "content",

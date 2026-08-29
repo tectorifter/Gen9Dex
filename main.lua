@@ -489,6 +489,16 @@ local function installMovepoolEffects(mod)
     -- 3-param function signature silently never receives arg 5 at
     -- all -- both real traps for this handler, not guessed around.
     run = function(a, b, c, d, e)
+      -- Read off mod.exports HERE rather than named bare. `normalize` is a
+      -- local inside combat/modern_combat.lua, published as
+      -- mod.exports.normalize -- so a bare `normalize(...)` in this file is a
+      -- GLOBAL read: nil, and it raises the moment a GALAR_TRAP_EFFECT move is
+      -- used. Reported from a real battle as "main.lua:492: attempt to call
+      -- global 'normalize' (a nil value)". Every other consumer already does
+      -- this (combat/modern_hazards.lua:94); this one site was missed. Read
+      -- inside `run` so no load-order assumption is made.
+      local normalize = mod.exports.normalize
+      if not normalize then return {} end
       local n = normalize(a, b, c)
       if not n.target then return {} end
       local moveId = n.gen2 and e or (a.move and a.move.id)
@@ -546,6 +556,10 @@ local CUSTOM_EFFECT_PATCH = {
   -- main.lua's own GALAR_TRAP_EFFECT (installMovepoolEffects above) --
   -- every real trap move (ailment="trap" on national_dex), not just
   -- Sand Tomb, now that the Gen 2 dispatch bug is fixed
+  -- Metal Burst. combat/modern_movepool_counter.lua registers
+  -- GALAR_METALBURST_EFFECT in full and nothing pointed at it, so the move
+  -- kept national_dex's EFFECT_NORMAL_HIT and the handler was unreachable.
+  METALBURST = "GALAR_METALBURST_EFFECT",
   SANDTOMB = "GALAR_TRAP_EFFECT",
   BIND = "GALAR_TRAP_EFFECT",
   WRAP = "GALAR_TRAP_EFFECT",

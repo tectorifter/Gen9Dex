@@ -178,6 +178,54 @@ return function(mod)
         local dmg = math.max(1, math.floor(taken * numerator / denominator))
         return math.min(65535, dmg), { crit = false, typeMult = 10 }
       end,
+
+      -- THE GEN 2 HALF.  `chooseDamage` above is read by Gen 1's
+      -- EffectRegistry and by nothing else -- Gen 2 dispatches a mod's move
+      -- effect through Battle.moveEffectRecordFor(...).run and reads no other
+      -- field (src/battle/gen2/Battle.lua). So on Gold and Crystal the whole
+      -- family above was unreachable, and Metal Burst landed as an ordinary
+      -- move. This file's own header recorded that as a hard limit; it is not
+      -- one. What the header established is that Gen 2's own COUNTER TABLE
+      -- cannot be registered into -- but the state that table reads is just a
+      -- volatile, and a mod can read it directly.
+      --
+      -- `tookThisTurn` / `tookKind` are accumulated per hit inside
+      -- Battle:dealDamage and cleared at the top of every turn, on the
+      -- volatile of whoever TOOK the damage -- which for a counter move is
+      -- the user. Mirrored from the native arm beside it, which does exactly
+      -- this for EFFECT_COUNTER / EFFECT_MIRROR_COAT.
+      --
+      -- GUARDED TO GEN 2 ONLY, and that guard is load-bearing: Gen 1's
+      -- EffectRegistry ALSO calls `record.run` for any record whose kind is
+      -- not "primary" (EffectRegistry.lua:341), and this one is "full". An
+      -- unguarded run would therefore fire on Gen 1 as well, on top of the
+      -- chooseDamage that already resolved the move -- countering twice.
+      run = function(a, b, c, d, e)
+        -- Lazily, for the same reason main.lua's GALAR_TRAP_EFFECT reads it
+        -- lazily: this closure runs at battle time, long after
+        -- modern_combat.lua publishes it, so no load-order assumption.
+        local normalize = mod.exports.normalize
+        if not normalize then return {} end
+        local n = normalize(a, b, c)
+        -- Gen 1 already resolved this move through chooseDamage above.
+        if not n.gen2 then return {} end
+
+        local battle, user, target = n.battle, n.user, n.target
+        if not (battle and user and target) then return {} end
+        local def, moveId = d, e
+        local state = battle:volatile(user)
+        local taken = state.tookThisTurn or 0
+        local rightKind = wantedKind == nil or state.tookKind == wantedKind
+        if taken <= 0 or not rightKind then
+          battle:markMissed()
+          battle:emit({ kind = "message", text = "But it failed!" })
+          return {}
+        end
+        local dmg = math.max(1, math.floor(taken * numerator / denominator))
+        battle:dealDamage(user, target, math.min(65535, dmg),
+          { move = def, moveId = moveId })
+        return {}
+      end,
     })
   end
 
