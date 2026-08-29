@@ -2129,11 +2129,14 @@ return function(mod)
   installTempTestRegistrations(mod)
 
   -- ------- Phase 16: move-availability gate (0-PP-style blocking) -------
-  -- Installed LAST, deliberately: wraps BattleState:update on both
-  -- generations and must be the outermost layer so its input check runs
-  -- before every other :update wrap installed above (sprite animation,
-  -- custom_battle_scene, gimmick_dynamax, gen2_wide_scene) gets a chance
-  -- to consume the frame -- see move_availability_gate.lua's own header.
+  -- Wraps BattleState:update on both generations and must be the outermost
+  -- layer among the wraps installed ABOVE it, so its input check runs
+  -- before any of them (sprite animation, custom_battle_scene,
+  -- gimmick_dynamax, gen2_wide_scene) gets a chance to consume the frame --
+  -- see move_availability_gate.lua's own header. Phase 17 is installed
+  -- after it and is therefore now the true outermost layer; that does not
+  -- weaken this one, because Phase 17 reads no input and consumes no frame
+  -- in any phase but its own (see the note there).
   local installMoveAvailabilityGate = loadSibling(mod, "combat/move_availability_gate.lua")
   -- CONFIRMED live crash, this session: learnset_ownership.lua's own
   -- return table uses the key `isUsable` (its own local function's real
@@ -2145,4 +2148,28 @@ return function(mod)
   -- frame -- not something these two files' earlier edits this session
   -- introduced, a pre-existing naming mismatch this exposed.
   installMoveAvailabilityGate(mod, learnsetOwnership.isUsable)
+
+  -- ------- Phase 17: two-choice in-battle prompt (mod-facing primitive) ---
+  -- mod.exports.askBattleChoice / battleChoiceActive / cancelBattleChoice:
+  -- any mod (including this one's own future boss-encounter code) can put a
+  -- two-choice question on the Gen 2 battle screen and be called back with
+  -- the answer. A primitive only -- nothing in it knows what a boss, a
+  -- capture or an HP threshold is. See combat/battle_prompt.lua's own header
+  -- for the base-engine limitation it works around (the yes/no box is drawn
+  -- only for five hardcoded phase names, and an unrecognised phase falls off
+  -- the end of native :update every frame) and for why Gen 1 is a follow-up
+  -- rather than part of this.
+  --
+  -- Installed LAST of all, after the gate above: its :update wrap must be
+  -- the outermost so its own phase name is intercepted before ANY other
+  -- wrap can see it -- an unrecognised phase reaching another wrap's
+  -- phase-specific code is the risk the whole file is built to remove. It
+  -- takes nothing away from Phase 16: outside its own phase this wrap reads
+  -- no input at all and falls straight through to native on the same frame.
+  --
+  -- Deliberately NOT folded into combat/boss_fight.lua even though the boss
+  -- capture case is its motivating consumer -- that file is a flag-set
+  -- policy layer with no UI and no class wrap; this is a screen primitive.
+  local installBattlePrompt = loadSibling(mod, "combat/battle_prompt.lua")
+  installBattlePrompt(mod)
 end
