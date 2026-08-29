@@ -2120,6 +2120,14 @@ return function(mod)
   local installCustomTrainerRegistry = loadSibling(mod, "trainers/custom_trainer_registry.lua")
   installCustomTrainerRegistry(mod)
 
+  -- TEMPORARY, 2026-08-29: in-process trainer registrations (Joey ->
+  -- 2x Excadrill, doubles), isolated in their own file for readability
+  -- -- see trainers/temp_test_registrations.lua's own header. Revert/
+  -- delete both once the cross-mod registerTrainer investigation is
+  -- resolved -- this does not belong in a shipped build.
+  local installTempTestRegistrations = loadSibling(mod, "trainers/temp_test_registrations.lua")
+  installTempTestRegistrations(mod)
+
   -- ------- Phase 16: move-availability gate (0-PP-style blocking) -------
   -- Installed LAST, deliberately: wraps BattleState:update on both
   -- generations and must be the outermost layer so its input check runs

@@ -33,14 +33,20 @@
 -- already true of GMAX_AMNESIA_EFFECT/GMAX_GROWTH_EFFECT, not something
 -- this file introduces or is trying to fix.
 --
--- Damaging-move (power > 0) secondary effects ALWAYS gen2-guard
--- (`if n.gen2 then return {} end`) at the top of run(), matching
--- GMAX_PSYCHIC_SPD_EFFECT's own established precedent: Gen 2's dispatch
--- calls ANY move_effects record with a .run field BEFORE the damage
--- path and returns immediately, so an unguarded secondary handler would
--- silently eat the move's damage on Gen 2, not just skip the extra
--- effect. Pure status moves (power == 0) need no such guard -- there's
--- no damage to pre-empt.
+-- STALE, CONFIRMED WRONG (2026-08-28, direct user report -- "liquidation
+-- move is dealing no damage" -- see the `secondary()` function's own
+-- header further down for the full correction): this used to claim
+-- damaging-move secondary effects were safe as long as they gen2-guarded
+-- (`if n.gen2 then return {} end`) INSIDE run(). They are not -- Gen 2's
+-- dispatch calls ANY move_effects record with a .run field BEFORE the
+-- damage path and returns immediately once it does, true regardless of
+-- what the handler's body does, so that internal guard never had a
+-- chance to matter -- Gen 2 had already skipped its own damage
+-- computation by the time it ran. Every damaging move ever registered
+-- through `secondary()` (29 real moves, not a hypothetical) dealt ZERO
+-- damage on Gen 2 until this same pass fixed it by moving off kind=
+-- "secondary" entirely. Pure status moves (power == 0, the `primary()`
+-- function) were never affected -- there's no damage to pre-empt.
 --
 -- Chance-based secondaries use the engine's own 0-255 roll convention
 -- (already established by native's statDownSide, MoveEffects.lua:136,
@@ -70,7 +76,8 @@ return function(mod)
   local normalize = mod.exports.normalize
   local resetStages = mod.exports.resetStages
   local bossStatsDropBlocked = mod.exports.bossStatsDropBlocked
-  assert(changeStage and normalize and resetStages and bossStatsDropBlocked,
+  local isGen2Battle = mod.exports.isGen2Battle
+  assert(changeStage and normalize and resetStages and bossStatsDropBlocked and isGen2Battle,
     "modern_movepool_stages: combat/modern_combat.lua must load first")
 
   -- See file header. `n` is already-normalized ({battle,user,target,gen2}
@@ -142,32 +149,81 @@ return function(mod)
     })
   end
 
-  -- Secondary stat change(s) on a damaging move (power > 0). kind=
-  -- "secondary" fires post-damage on Gen 1 (EffectRegistry.runDamaging,
-  -- any kind ~= "primary", only when the hit actually landed and dealt
-  -- damage -- so a guaranteed "100%" secondary needs no extra roll,
-  -- landing the hit already qualifies it). chance255 is the move's real
-  -- percentage out of 256, nil for a genuinely unconditional secondary.
-  -- Self-targeted secondaries (Close Combat, Leaf Storm, Superpower)
-  -- share the same EffectRegistry gate as target-targeted ones,
-  -- including its `target.mon.hp > 0` clause -- real games apply a
-  -- self-drop even on a KOing hit; this engine's shared dispatch won't,
-  -- a pre-existing dispatch-level limitation, not something new here.
+  -- Secondary stat change(s) on a damaging move (power > 0).
+  --
+  -- REAL, CONFIRMED BUG FIXED HERE (2026-08-28, direct user report --
+  -- "liquidation move is dealing no damage"): this function used to
+  -- register `kind = "secondary"` with a real `run` field and guard Gen 2
+  -- INSIDE that handler (`if n.gen2 then return {} end`) -- but Gen 2's
+  -- own real dispatch (gen2/Battle.lua:1533-1538) calls ANY move_effects
+  -- record with a `.run` field BEFORE its own damage path and returns
+  -- immediately once it does, true regardless of what the handler's body
+  -- does -- the exact same real gotcha modern_hazards.lua's own Rapid Spin
+  -- section already found and fixed. An internal Gen-2 guard never had a
+  -- chance to matter: Gen 2 had already skipped its own damage computation
+  -- by the time that guard ran. Every one of this helper's real callers
+  -- (Liquidation, Crunch, Close Combat, Superpower, Flash Cannon, Energy
+  -- Ball, Bug Buzz, Rock Tomb, Rock Smash, Play Rough, Spirit Break,
+  -- Struggle Bug, Leaf Storm, Ancient Power, Acid Spray, Apple Acid,
+  -- Breaking Swipe, Bulldoze, Drum Beating, Fire Lash, Flame Charge, Grav
+  -- Apple, Hammer Arm, Lunge, Metal Claw, Power-Up Punch, Razor Shell,
+  -- Steel Wing -- confirmed, every single move ever registered through
+  -- this function) dealt ZERO damage on Gen 2 -- a real, systemic bug
+  -- across this whole file, not just the one move reported.
+  --
+  -- Fixed the exact same way Rapid Spin already was: `kind = "full"` (no
+  -- run field at all -- invisible to that dispatch check on both engines,
+  -- confirmed via EffectRegistry.runDamaging being nil-safe on every stage
+  -- field) for real, ordinary damage on both generations, and the stat
+  -- change wired through `battle.damage_dealt` instead (confirmed
+  -- identical payload on both engines, fires only AFTER a landed,
+  -- non-zero hit -- exactly "the hit actually landed and dealt damage,"
+  -- the same real condition the old kind="secondary" dispatch used). One
+  -- shared listener below (not one per call), keyed by the move's own
+  -- real `effect` field via SECONDARY_STAT_EFFECTS.
+  --
+  -- This also correctly ENABLES the stat-change half on Gen 2 for the
+  -- first time: the old code's own `if n.gen2 then return {} end` had
+  -- deliberately disabled it there as an honest scope limit (this file's
+  -- own header, "damaging-move secondary effects ALWAYS gen2-guard") --
+  -- moot now that battle.damage_dealt is a real, correct, both-engines
+  -- dispatch point, so Gen 2 gets the real chance-based stat drop for the
+  -- first time too, not just a damage fix.
+  --
+  -- Message display is ALSO fixed as a side effect: applyChange's own
+  -- return value is a message-string array (changeStage/changeNativeStage
+  -- both return strings, never emit themselves) that the OLD run()-based
+  -- dispatch only ever displayed on Gen 1 (this file's own header, "Gen 2
+  -- message caveat" -- Gen 2's dispatch discards a handler's return value
+  -- entirely). This listener explicitly `battle:emit`s every returned
+  -- string itself, so the message now shows on BOTH engines instead of
+  -- silently only Gen 1.
+  --
+  -- chance255 is the move's real percentage out of 256, nil for a
+  -- genuinely unconditional secondary. Self-targeted secondaries (Close
+  -- Combat, Leaf Storm, Superpower) apply even on a KOing hit here (no
+  -- `target.mon.hp > 0`-style gate on this new dispatch path) -- arguably
+  -- MORE correct than the old EffectRegistry-gated behavior for a
+  -- self-drop, not a regression.
+  local SECONDARY_STAT_EFFECTS = {} -- effectId -> {changes=, chance255=}
   local function secondary(effectId, changes, chance255)
-    mod.content.move_effects:register(effectId, {
-      kind = "secondary",
-      run = function(a, b, c)
-        local n = normalize(a, b, c)
-        if n.gen2 then return {} end
-        if chance255 and n.battle.rng(0, 255) >= chance255 then return {} end
-        local out = {}
-        for _, ch in ipairs(changes) do
-          for _, m in ipairs(applyChange(n, ch)) do out[#out + 1] = m end
-        end
-        return out
-      end,
-    })
+    mod.content.move_effects:register(effectId, { kind = "full" })
+    SECONDARY_STAT_EFFECTS[effectId] = { changes = changes, chance255 = chance255 }
   end
+  mod.events:on("battle.damage_dealt", function(ev)
+    local battle = ev and ev.battle
+    local move = ev and ev.move
+    local effectId = move and move.effect
+    local entry = effectId and SECONDARY_STAT_EFFECTS[effectId]
+    if not (battle and entry and ev.user and ev.target and (ev.damage or 0) > 0) then return end
+    if entry.chance255 and battle.rng(0, 255) >= entry.chance255 then return end
+    local n = { battle = battle, user = ev.user, target = ev.target, gen2 = isGen2Battle(battle) }
+    for _, ch in ipairs(entry.changes) do
+      for _, m in ipairs(applyChange(n, ch)) do
+        battle:emit({ kind = "message", text = m })
+      end
+    end
+  end)
 
   ------------------------------------------------------------------
   -- Pure status moves (guaranteed, primary)

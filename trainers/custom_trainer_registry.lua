@@ -73,6 +73,30 @@
 --      the ordinary native trainer battle, unmodified.
 return function(mod)
   local Trainers = require("src.world.gen2.Trainers")
+  -- Re-install guard, same real pattern stats/gen2_modern_stats.lua's own
+  -- Gen2Battle.__galarGen2ModernStatsWrapped already established in this
+  -- codebase -- flag lives on the real, shared, require-cached Trainers
+  -- table itself (confirmed real and single-instance: src/mods/Sandbox
+  -- .lua's own sandboxedRequire delegates straight to the real global
+  -- require, so every mod's require("src.world.gen2.Trainers") returns
+  -- the SAME table, not a per-mod copy), not on a local -- a local
+  -- inside this closure would be worthless as a re-run guard since a
+  -- second run gets its own fresh one. Without this, a second install
+  -- (a mod-reload/re-init, if this loader ever does one) would silently
+  -- build a SECOND, empty `registry` closure and repoint mod.exports
+  -- .registerTrainer at it -- any earlier registerTrainer call (a
+  -- caller mod whose own main.lua only ran once) would then be writing
+  -- into an orphaned registry nothing still reads from, while every
+  -- live battle.started/Trainers.party/World:startBattle check reads
+  -- the new, empty one. Exactly the "registered but never matches"
+  -- shape under live investigation as this guard was added.
+  if Trainers.__g9CustomTrainerRegistryInstalled then
+    mod.log:warn("g9-battle-engine-beta: custom_trainer_registry: install "
+      .. "attempted a second time, refused -- mod.exports.registerTrainer "
+      .. "still points at the FIRST install's own registry, unchanged")
+    return
+  end
+  Trainers.__g9CustomTrainerRegistryInstalled = true
   local Mon = require("src.battle.gen2.Mon")
   local ModernStats = mod.exports.ModernStats
   local setTeraType = mod.exports.setTeraType
@@ -285,28 +309,35 @@ return function(mod)
   -- depend on ability/nature/IV/EV generation having run first).
   ------------------------------------------------------------------
   -- TEMPORARY DIAGNOSTIC (2026-08-28, remove once the roster-mismatch
-  -- report is resolved): prints the computed key and every real
-  -- opponent species straight into the battle text box, since static
-  -- reading of this whole chain has repeatedly checked out and the
-  -- fastest way to find an actual discrepancy is to just look at it
-  -- live. Fires for EVERY trainer battle, registered or not, so a
-  -- fought-but-unregistered trainer (wrong key assumption) is visible
-  -- too, not just a silent no-op.
+  -- report is resolved). One tight line -- the battle text box
+  -- paginates/truncates anything longer. Member id is back in (a real
+  -- rematch mod, Trainer_Rematches, is active in this save, and it may
+  -- be routing straight to JOEY2 instead of JOEY1 even on a first meet
+  -- -- this is the one way to actually see which one fired):
+  --   M1 = registry matched      M0 = no match
+  --   memberId (up to 6 chars), then 4-letter species codes
   mod.events:on("battle.started", function(ev)
     local battle = ev and ev.battle
     if ev.kind ~= "trainer" or not (battle and isGen2Battle(battle)) then return end
     local trainer = ev.trainer
-    local classId = trainer and (trainer.classId or trainer.class)
     local memberId = trainer and (trainer.memberId or trainer.id)
-    local key = keyFor(classId, memberId)
+    local key = keyFor(trainer and (trainer.classId or trainer.class), memberId)
     local record = key and registry[key]
-    local names = {}
+    local codes = {}
     for _, mon in ipairs(battle.enemyParty or {}) do
-      names[#names + 1] = tostring(mon and mon.species)
+      codes[#codes + 1] = tostring(mon and mon.species or "????"):sub(1, 4)
     end
-    battle:emit({ kind = "message", text = "[diag] key=" .. tostring(key)
-      .. " matched=" .. tostring(record ~= nil)
-      .. " enemyParty=" .. table.concat(names, ",") })
+    battle:emit({ kind = "message",
+      text = "M" .. (record and "1" or "0") .. " " .. tostring(memberId):sub(1, 6)
+        .. " " .. table.concat(codes, ",") })
+    -- Second diagnostic line: what's ACTUALLY in the registry right now,
+    -- regardless of whether this specific trainer matched -- settles
+    -- "registerTrainer never ran / wrote a different key" vs. "it ran,
+    -- this lookup itself is wrong" directly, no more guessing.
+    local allKeys = {}
+    for k in pairs(registry) do allKeys[#allKeys + 1] = k end
+    battle:emit({ kind = "message",
+      text = "REG " .. #allKeys .. " " .. table.concat(allKeys, ","):sub(1, 60) })
   end)
 
   mod.events:on("battle.started", function(ev)
@@ -335,14 +366,38 @@ return function(mod)
   -- .trainer table (classId/memberId/party/...) and calls
   -- World:startBattle(opts) itself, so opts.trainer.party here already
   -- holds THIS file's own custom roster from integration point 1 above
-  -- whenever this is a registered trainer, not the vanilla one. Reuses
-  -- the exact real g9-Battle-Scene integration mods/Sample-Battle-Scene-
-  -- G9/main.lua's own tryDoublesTrainer already established (confirmed
-  -- by direct read of that file) -- same enemyCount/allyCount-from-
-  -- layout-preset sizing, same trainer= field forwarded through
-  -- unmodified so payout/gym-leader-happiness/name all stay correct
-  -- (that file's own comment: a plain boolean flag there would have
-  -- silently zeroed the payout).
+  -- whenever this is a registered trainer, not the vanilla one.
+  --
+  -- REAL DIVISION OF RESPONSIBILITY (2026-08-29, explicit user
+  -- correction after live testing): this file tells g1r's own native
+  -- engine the roster and moves (integration point 1, Trainers.party --
+  -- unchanged, that's the one real place a mon's species/level/moveset
+  -- gets decided) and holds the stats to process them in battle
+  -- (integration points 2/3). It does NOT decide who fights in a
+  -- doubles/triples layout -- confirmed by direct read of g9-Battle-
+  -- Scene's own Screen.new (mods/g9-Battle-Scene/battle_screen.lua):
+  -- it builds its enemy battler list with a bare `for i, mon in
+  -- ipairs(payload.enemies)` loop, N-agnostic, no independent "how many
+  -- should this layout actually show" check of its own -- so g9-Battle-
+  -- Scene renders EXACTLY whatever array it's handed, at whatever size
+  -- that array is, and has no way to pull a roster on its own (its own
+  -- design, confirmed: "this mod never builds the roster itself").
+  -- Pre-slicing `trainer.party` down to the layout preset's own
+  -- enemyCount here (the ORIGINAL shape of this wrap) meant THIS file
+  -- was deciding who fights, not just requesting a layout -- exactly
+  -- the "preloading" a registered trainer's own already-correctly-sized
+  -- roster (registerTrainer's own `party`, whatever size the caller
+  -- registered it at) should never need. `trainer.party` -- the SAME
+  -- real array integration point 1 already built -- is forwarded here
+  -- completely unmodified; g9-Battle-Scene remains fully agnostic to
+  -- WHICH Pokemon these are, only ever told the layout name.
+  --
+  -- Player-side ally selection is a genuinely separate, native concern
+  -- (which of the PLAYER's own party comes out) -- kept at the same
+  -- layout-preset-driven `allyCount` slice mods/Sample-Battle-Scene-G9's
+  -- own tryDoublesTrainer already established, untouched by this
+  -- correction (the directive was specifically about the NPC/enemy
+  -- roster).
   --
   -- g9-Battle-Scene is a genuinely separate, optional mod -- resolved
   -- live via mod.find, never a hard dependency. Falls straight through
@@ -373,19 +428,13 @@ return function(mod)
         local layoutData = exportMod.exports.getLayoutData
           and exportMod.exports.getLayoutData(combatType)
         local defaultCount = (combatType == "triples") and 3 or 2
-        local enemyCount = math.max(1, math.min(6, (layoutData and layoutData.enemyCount) or defaultCount))
         local allyCount = math.max(1, math.min(6, (layoutData and layoutData.allyCount) or defaultCount))
-        local enemies = {}
-        for i = 1, math.min(enemyCount, #trainer.party) do
-          enemies[#enemies + 1] = trainer.party[i]
-        end
         local players = {}
         for i = 1, allyCount do
           if save.party[i] then players[#players + 1] = save.party[i] end
         end
-        if #enemies == 0 then return false end
         return exportMod.exports.pushLayoutBattle(combatType, self.game, self, {
-          enemies = enemies, players = players, trainer = trainer,
+          enemies = trainer.party, players = players, trainer = trainer,
         }) and true or false
       end)
       if ok and handled then return true end

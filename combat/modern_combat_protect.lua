@@ -306,6 +306,47 @@ return function(mod)
   end)
 
   ------------------------------------------------------------------
+  -- Part C2: real, confirmed bug fix (2026-08-28, direct user report --
+  -- "max guard and protect uses aren't doing the formula for lower
+  -- chance till fail to restore 100% chance of passing"). The decay
+  -- chain (protectChainX/protectChainTurn) is stored directly on the
+  -- mon's own persistent table, NOT a per-battle volatile -- confirmed
+  -- the same real shape this whole session's own established knowledge
+  -- already flags repeatedly (Gen 2 mon tables are the persistent party
+  -- members, the SAME table across every battle that mon ever fights).
+  -- Real Showdown's own equivalent ("stall") is a genuine per-BATTLE
+  -- volatile that clears automatically on switch-out and never exists
+  -- at all in a fresh battle -- this mod's own fields had no such
+  -- clearing anywhere (confirmed, grepped every reference to both
+  -- fields in this whole mod: only ever read/written inside this same
+  -- file's own two run() handlers above, never reset elsewhere), so a
+  -- mon that had decayed down to 1/9 or lower stayed decayed forever
+  -- after switching out and back in, or even into a LATER, completely
+  -- separate battle -- exactly the reported symptom, "never restores
+  -- 100%." Fixed the same real way modern_items.lua's own Ripen/Cheek
+  -- Pouch state (ggdLastConsumedItem/ggdConsumedBerryThisBattle) already
+  -- resets: on `battle.started` for the WHOLE party (every mon that
+  -- might switch in fresh, not just the two currently active) and on
+  -- `battle.battler_switched` for whichever mon just left (`ev.previous`
+  -- -- the same real field Natural Cure/Regenerator already read for an
+  -- identical "the mon that just left" need).
+  ------------------------------------------------------------------
+  local function clearProtectChain(mon)
+    if not mon then return end
+    mon.protectChainX = nil
+    mon.protectChainTurn = nil
+  end
+  mod.events:on("battle.started", function(ev)
+    local battle = ev and ev.battle
+    if not battle then return end
+    for _, mon in ipairs(battle.party or {}) do clearProtectChain(mon) end
+    for _, mon in ipairs(battle.enemyParty or {}) do clearProtectChain(mon) end
+  end)
+  mod.events:on("battle.battler_switched", function(ev)
+    clearProtectChain(ev and ev.previous)
+  end)
+
+  ------------------------------------------------------------------
   -- Part E: Z-Moves bypass Protect/Max Guard entirely, same as Feint --
   -- explicit user spec. Unlike Feint (a fixed id already carrying
   -- bypassesProtect = true in this mod's own moves_new.lua), Z-Moves are
