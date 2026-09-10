@@ -1,0 +1,14 @@
+-- Documentation marker only -- Mold Breaker/Teravolt/Turboblaze have no
+-- own dispatch file: each is wired as a direct check inside the
+-- immunity primitives it needs to bypass (abilities/engine/
+-- type_immunity.lua's own type-immunity family, abilities/engine/
+-- damage_immunity.lua's own Wonder Guard), the same "edit the shared
+-- primitive directly" pattern Contrary/Simple already established.
+-- Real, honestly-scoped: covers the type-immunity family (a Ground move
+-- now hits Levitate/Water Absorb/Sap Sipper/Volt Absorb/Well-Baked
+-- Body) and Wonder Guard -- NOT Showdown's own full, broader ignore-list
+-- (Sturdy, stat-change-prevention, crit-immunity, priority-move-fail,
+-- and several other real families this ability also bypasses in the
+-- real games), which would need touching every immunity site in this
+-- mod individually -- not attempted this pass, a real remaining gap.
+return { MOLDBREAKER = true, TERAVOLT = true, TURBOBLAZE = true }

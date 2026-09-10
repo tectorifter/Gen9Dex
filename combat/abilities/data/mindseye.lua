@@ -1,0 +1,12 @@
+-- Documentation-only marker -- Phase 8 (`other` bucket). Real Mind's Eye
+-- has TWO separate halves: (1) Normal/Fighting moves hit Ghost-types
+-- normally -- the same real shape as Scrappy's own effect, built
+-- alongside it directly in combat/modern_status_volatiles.lua's existing
+-- type_immunity_negation registerPostEffectivenessModifier; (2) this
+-- Pokemon's moves ignore the target's evasion stat boosts, and its own
+-- accuracy can't be lowered by an opponent -- a real, separate,
+-- honestly-deferred gap: this engine's accuracy chain (abilities/engine/
+-- accuracy_multiplier.lua) has no per-stage-ignoring primitive yet (the
+-- same real gap Unaware's own marker already flags for its own
+-- accuracy/evasion half) -- not built here.
+return { MINDSEYE = true }

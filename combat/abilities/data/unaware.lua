@@ -1,0 +1,11 @@
+-- Documentation marker only -- Unaware has no own dispatch file: wired
+-- directly into `combat/modern_combat.lua`'s own damage formula (the
+-- shared attack/defense stage resolution, same "edit the primitive
+-- directly" pattern Contrary/Simple already established) -- real,
+-- confirmed direction: the DEFENDER's own Unaware ignores the
+-- ATTACKER's attack-stat boost; the ATTACKER's own Unaware ignores the
+-- DEFENDER's defense-stat boost. Real remaining gap, not built this
+-- pass: the accuracy half (ignoring the target's own evasion stage when
+-- the Unaware holder is attacking) -- a separate, smaller real rule,
+-- not attempted here.
+return { UNAWARE = true }

@@ -1,0 +1,12 @@
+-- Inclusion list only -- Phase 7 (`prevent` bucket). Real, confirmed
+-- effect: prevents using OR benefiting from a held item at all, Fling
+-- included. Honest partial, same boundary this mod's own "Held items"
+-- section already documents: move-triggered interactions (Fling,
+-- Recycle -- the two moves where the ACTOR's own item is the whole
+-- mechanic) are gated here; passive held-item effects (Leftovers,
+-- Quick Claw, King's Rock...) are Gen 2's own native, ROM-driven
+-- mechanism, pre-existing and untouched by this mod anywhere -- not
+-- something this ability can reach without a real passive-item-
+-- suppression primitive this mod doesn't have, a genuine remaining gap
+-- rather than silently claimed fixed.
+return { KLUTZ = true }
