@@ -211,5 +211,86 @@ return function(mod)
     return t == "all-opponents" or t == "all-other-pokemon"
   end
 
-  mod.log:info("g9-battle-engine-beta: move_targeting installed (resolveMoveTargets, isSpreadMove, allActiveBattlers, N-way Battle:sideOf)")
+  ------------------------------------------------------------------
+  -- ROUND 26 (2026-09-10): mid-turn faint redirection. In a
+  -- multi-battler battle two actions can pick the SAME target, and the
+  -- first one to resolve can faint it before the second is delivered.
+  -- The real rule (and the user's explicit spec): a move aimed at a FOE
+  -- redirects to another live adjacent foe; a move aimed at an ALLY has
+  -- no other legal recipient and simply FAILS (Heal Pulse aimed at an
+  -- ally that fainted first fails -- it must never "revive" the corpse
+  -- by healing it, and an enemy move must never be applied to a fainted
+  -- mon at all). combat/turn_order.lua's resolveTurnActions consults
+  -- these three helpers at resolution time; they live here, next to the
+  -- rest of the target-archetype knowledge, so the whole "who can this
+  -- move hit" domain stays in one place.
+  ------------------------------------------------------------------
+
+  -- targetArchetypeOf(moveId) -> national_dex's own `target` string, with
+  -- the same "selected-pokemon" default resolveMoveTargets/isSpreadMove
+  -- use. The single fact every redirection decision below is built on.
+  mod.exports.targetArchetypeOf = function(moveId)
+    local info = moveById(moveId)
+    return (info and info.target) or "selected-pokemon"
+  end
+
+  -- Archetypes whose single chosen recipient IS on the caster's own side
+  -- and cannot be swapped for anyone else: Helping Hand and Aromatic Mist
+  -- ("ally"), Acupressure ("user-or-ally"). A fainted chosen target means
+  -- the move FAILS. Deliberately NOT including "all-allies" /
+  -- "user-and-allies" here -- those affect the whole side and their
+  -- chosen target is only a UI placeholder, so they still resolve with
+  -- the rest of the side intact.
+  local ALLY_RECIPIENT_ARCHETYPES = {
+    ["ally"] = true,
+    ["user-or-ally"] = true,
+  }
+  mod.exports.isAllyDirectedMove = function(moveId)
+    return ALLY_RECIPIENT_ARCHETYPES[mod.exports.targetArchetypeOf(moveId)] == true
+  end
+
+  -- isAllyTargetable(moveId) -> boolean. True when the move can legally be
+  -- aimed at one of the caster's OWN adjacent mons, i.e. the set a battle
+  -- scene's target picker should offer allies for. Covers the inherently
+  -- ally-directed archetypes plus the selected-pokemon moves that only
+  -- ever HEAL (Heal Pulse's own live record: target="selected-pokemon",
+  -- category="heal", healing=50) -- the classic case where the player
+  -- chooses which ally to heal from the same picker. Everything else
+  -- (attacks, spreads, self/field moves) is unchanged, so a plain attack
+  -- still auto-targets the sole live foe with no extra picker.
+  mod.exports.isAllyTargetable = function(moveId)
+    local info = moveById(moveId)
+    local archetype = (info and info.target) or "selected-pokemon"
+    if archetype == "ally" or archetype == "user-or-ally" then return true end
+    if archetype == "selected-pokemon"
+        and ((info.healing or 0) > 0 or info.category == "heal") then
+      return true
+    end
+    return false
+  end
+
+  -- pickAdjacentEnemy(battle, caster, moveId) -> one live adjacent enemy,
+  -- or nil when none is left standing. Used when a single-target move's
+  -- chosen target fainted mid-turn: the real games redirect the move to
+  -- a random remaining adjacent foe (never to an ally). Random through
+  -- the battle's own roller -- the same RNG source computeTurnOrder uses
+  -- for a speed tie -- so a redirect is reproducible from the battle's
+  -- seed like every other random choice in this mod.
+  mod.exports.pickAdjacentEnemy = function(battle, caster, moveId)
+    local adjacency = mod.exports.requestAdjacency(battle, caster, moveId)
+    local liveEnemies = {}
+    for _, m in ipairs(adjacency.enemies or {}) do
+      if m and (m.hp or 0) > 0 then liveEnemies[#liveEnemies + 1] = m end
+    end
+    if #liveEnemies == 0 then return nil end
+    if #liveEnemies == 1 then return liveEnemies[1] end
+    local roller = battle and battle.roller and battle:roller()
+    if type(roller) == "function" then
+      local index = (roller(#liveEnemies) or 0) + 1
+      return liveEnemies[index] or liveEnemies[1]
+    end
+    return liveEnemies[1]
+  end
+
+  mod.log:info("g9-battle-engine-beta: move_targeting installed (resolveMoveTargets, isSpreadMove, allActiveBattlers, N-way Battle:sideOf, faint-redirect helpers)")
 end

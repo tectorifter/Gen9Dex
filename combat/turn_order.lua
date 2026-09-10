@@ -322,6 +322,11 @@ return function(mod)
   -- actingBattlers: a flat list, any length, either side --
   --   { { mon = <real mon table>, move = <moveId>, target = <real mon> },
   --     ... }
+  -- `target` is the single chosen mon as of QUEUE time. If an earlier
+  -- action this turn faints it, THIS function redirects/fails that action
+  -- itself (see the ROUND 26 note below) -- the caller never has to
+  -- pre-check aliveness, exactly the mid-turn knowledge update
+  -- MULTI_BATTLE_HOOKS.md's own contract puts on this side of the seam.
   --
   -- SPEED, deliberately NOT read via battle:effectiveSpeed(mon): that
   -- method computes self.stages[self:sideOf(mon)] (Battle.lua:845-848),
@@ -351,6 +356,83 @@ return function(mod)
     local stage = Primitives and Primitives.stageOf(mon, "spe") or 0
     local boosted = Damage.applyStage(raw, stage)
     return Battle.statusPenaltyFor(battle.data, mon, "speed", boosted)
+  end
+
+  ------------------------------------------------------------------
+  -- ROUND 26 (2026-09-10): mid-turn faint redirection for SINGLE-TARGET
+  -- actions. Two actions in one multi-battler turn can name the SAME
+  -- target, and whichever resolves first can faint it before the later
+  -- one is delivered -- which, before this, left the later action applying
+  -- its move to a 0-HP corpse: a second attack landing on an already-
+  -- fainted mon, or Heal Pulse "reviving" it just to have it re-faint.
+  -- The real rule (the user's own explicit spec) is decided by the fainted
+  -- target's SIDE at resolution time:
+  --   * an ENEMY-directed move still has legal recipients, so it redirects
+  --     to a random live adjacent foe (combat/move_targeting.lua's own
+  --     pickAdjacentEnemy), and fails outright when none is left standing;
+  --   * an ALLY-directed move (Heal Pulse aimed at an ally, plus the
+  --     inherently ally-only Helping Hand / Aromatic Mist / Acupressure)
+  --     has no alternate recipient at all -- it simply FAILS, spending its
+  --     PP and announcing itself exactly like any other failed move, and
+  --     never touching the fainted ally.
+  -- Spread moves are deliberately untouched: resolveMoveTargets already
+  -- re-expands them over the LIVE roster just below, which is the same
+  -- redirection for free. This path only ever runs for a single-target
+  -- action whose chosen target was alive when queued and is not anymore.
+  ------------------------------------------------------------------
+
+  local function findMoveSlot(mon, moveId)
+    if not (mon and mon.moves) then return nil end
+    for _, ms in ipairs(mon.moves) do
+      if ms and ms.id == moveId then return ms end
+    end
+    return nil
+  end
+
+  -- The move was chosen and used, but has no valid recipient left: spend
+  -- its PP, announce "X used Y!" (the same kind="move" event native
+  -- useMove emits, kept as battle.moveEvent), mark it missed so the screen
+  -- plays no attack animation, then the engine's own failuretext line.
+  -- Mirrors Battle:useMove's own failed-move tail (Battle.lua:1470-1478,
+  -- :1656-1660): the PP is charged because the move WAS used, and the
+  -- announcement is kept so the player sees "used Heal Pulse!" followed by
+  -- "But it failed!" rather than the action silently vanishing.
+  local function failAction(battle, caster, moveId)
+    local moveSlot = findMoveSlot(caster, moveId)
+    if moveSlot and (moveSlot.pp or 0) > 0 then
+      moveSlot.pp = moveSlot.pp - 1
+    end
+    local def = battle.moveDef and battle:moveDef(moveId)
+    local name = battle.monName and battle:monName(caster)
+    if battle.emit then
+      battle.moveEvent = battle:emit({ kind = "move",
+        side = battle.sideOf and battle:sideOf(caster),
+        move = moveId,
+        text = (name or "?") .. "\nused " .. ((def and def.name) or moveId) .. "!" })
+      if battle.markMissed then battle:markMissed() end
+      battle:emit({ kind = "message", text = "But it failed!" })
+    end
+  end
+
+  -- resolveSingleTarget(battle, caster, moveId, chosen) -> targets, failed
+  -- targets is the list to deliver to (empty when nothing is left); failed
+  -- is true when the move has no valid recipient at all and must announce
+  -- its failure instead. A chosen target still standing resolves exactly as
+  -- it did before this round.
+  local function resolveSingleTarget(battle, caster, moveId, chosen)
+    if not chosen then return {}, false end
+    if (chosen.hp or 0) > 0 then return { chosen }, false end
+    local targeting = mod.exports
+    if targeting.isAllyDirectedMove and targeting.isAllyDirectedMove(moveId) then
+      return {}, true
+    end
+    if battle.sideOf and battle:sideOf(chosen) == battle:sideOf(caster) then
+      return {}, true
+    end
+    local redirect = targeting.pickAdjacentEnemy
+      and targeting.pickAdjacentEnemy(battle, caster, moveId)
+    if redirect then return { redirect }, false end
+    return {}, true
   end
 
   -- A self-switch effect (combat/switch_primitives.lua's own
@@ -400,16 +482,24 @@ return function(mod)
         -- and a mid-turn faint of the caster or a later target just skips
         -- whatever remains, lazily, same as single-target actions.
         local targets
+        local failed = false
         if mod.exports.isSpreadMove and mod.exports.isSpreadMove(entry.move) then
           targets = mod.exports.resolveMoveTargets(battle, entry.mon, entry.move, entry.target)
         else
-          targets = entry.target and { entry.target } or {}
+          -- Single-target: redirect to a live adjacent foe (or fail, for
+          -- an ally-directed move) when this action's chosen target fainted
+          -- to an earlier action this turn -- see resolveSingleTarget above.
+          targets, failed = resolveSingleTarget(battle, entry.mon, entry.move, entry.target)
         end
         local live = {}
         for _, t in ipairs(targets) do
           if t and (t.hp or 0) > 0 then live[#live + 1] = t end
         end
-        if #live > 0 then
+        if #live == 0 and failed then
+          -- No valid recipient and no redirect available: the move is used
+          -- (announced, PP spent) and fails.
+          failAction(battle, entry.mon, entry.move)
+        elseif #live > 0 then
           if #live > 1 then battle.__spreadTargetCount = #live end
           -- Native Battle:useMove is single-target: it re-runs the full
           -- per-use pipeline (PP decrement, the kind="move" announce
