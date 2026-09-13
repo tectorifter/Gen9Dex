@@ -1,11 +1,15 @@
 -- Documentation marker only -- Unaware has no own dispatch file: wired
--- directly into `combat/modern_combat.lua`'s own damage formula (the
--- shared attack/defense stage resolution, same "edit the primitive
--- directly" pattern Contrary/Simple already established) -- real,
--- confirmed direction: the DEFENDER's own Unaware ignores the
--- ATTACKER's attack-stat boost; the ATTACKER's own Unaware ignores the
--- DEFENDER's defense-stat boost. Real remaining gap, not built this
--- pass: the accuracy half (ignoring the target's own evasion stage when
--- the Unaware holder is attacking) -- a separate, smaller real rule,
--- not attempted here.
+-- directly into shared primitives -- real, confirmed direction: the
+-- DEFENDER's own Unaware ignores the ATTACKER's attack-stat boost; the
+-- ATTACKER's own Unaware ignores the DEFENDER's defense-stat boost
+-- (combat/modern_combat.lua's own damage formula, the shared
+-- attack/defense stage resolution).
+--
+-- Phase 11 (ability gaps close-out): the accuracy half, previously
+-- flagged here as a real remaining gap, is now built. On the
+-- "battle.accuracy" hook (abilities/engine/accuracy_multiplier.lua),
+-- an attacking Unaware holder zeroes the target's native evasion stage
+-- and a defending Unaware holder zeroes the attacker's native accuracy
+-- stage for the duration of the roll -- the exact two directions
+-- Showdown's onAnyModifyBoost implements (abilities.ts:5214-5234).
 return { UNAWARE = true }

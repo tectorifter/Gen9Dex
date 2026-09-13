@@ -98,5 +98,5 @@ return function(mod, data)
     if battle and mon then applySwitchInAbility(battle, mon) end
   end)
 
-  mod.log:info("g9-battle-engine-beta: switchin_weather ability engine installed (DRIZZLE, DROUGHT, SNOWWARNING, ORICHALCUMPULSE)")
+  mod.log:info("g9-battle-engine: switchin_weather ability engine installed (DRIZZLE, DROUGHT, SNOWWARNING, ORICHALCUMPULSE)")
 end

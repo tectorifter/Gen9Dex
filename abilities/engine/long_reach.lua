@@ -32,5 +32,5 @@ return function(mod, data)
     return true
   end
 
-  mod.log:info("g9-battle-engine-beta: long_reach installed (LONGREACH, exports makesContact)")
+  mod.log:info("g9-battle-engine: long_reach installed (LONGREACH, exports makesContact)")
 end

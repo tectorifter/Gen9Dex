@@ -238,6 +238,6 @@ return function(mod, data)
     end
   end)
 
-  mod.log:info("g9-battle-engine-beta: other_misc installed (BADDREAMS, CURSEDBODY, ANTICIPATION, "
+  mod.log:info("g9-battle-engine: other_misc installed (BADDREAMS, CURSEDBODY, ANTICIPATION, "
     .. "FOREWARN, WONDERSKIN, SCREENCLEANER, TOXICDEBRIS)")
 end

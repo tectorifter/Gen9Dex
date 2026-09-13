@@ -148,21 +148,24 @@ return function(mod)
   -- (manifest.json: games = ["gen2"]); Gen 1's own BattleState:sideOf is
   -- untouched, an honest, currently-moot gap (no Gen 1 multi-battler
   -- caller exists to fix this for yet).
-  local Battle = require("src.battle.gen2.Battle")
-  local nativeSideOfMulti = Battle.sideOf
-  function Battle:sideOf(mon)
-    -- nil guard, checked before ever reaching the native ternary: the
-    -- native `(mon == self.player) and "player" or "enemy"` answers
-    -- "enemy" for a nil mon too (nil is never == self.player), a real,
-    -- pre-existing quirk that's harmless for every EXISTING caller (every
-    -- one of them already only ever calls sideOf with a real mon) but
-    -- would misclassify a genuinely absent setter/caster as enemy-side
-    -- for a NEW caller that passes one through unchecked -- "no mon, no
-    -- side" is the more correct answer, so it's short-circuited here
-    -- rather than trusted to the native fallback.
-    if not mon then return nil end
-    if mon.multiSide then return mon.multiSide end
-    return nativeSideOfMulti(self, mon)
+  local gen2Ok_Battle, Battle = pcall(require, "src.battle.gen2.Battle")
+  Battle = gen2Ok_Battle and Battle or nil
+  if Battle then
+    local nativeSideOfMulti = Battle.sideOf
+    function Battle:sideOf(mon)
+      -- nil guard, checked before ever reaching the native ternary: the
+      -- native `(mon == self.player) and "player" or "enemy"` answers
+      -- "enemy" for a nil mon too (nil is never == self.player), a real,
+      -- pre-existing quirk that's harmless for every EXISTING caller (every
+      -- one of them already only ever calls sideOf with a real mon) but
+      -- would misclassify a genuinely absent setter/caster as enemy-side
+      -- for a NEW caller that passes one through unchecked -- "no mon, no
+      -- side" is the more correct answer, so it's short-circuited here
+      -- rather than trusted to the native fallback.
+      if not mon then return nil end
+      if mon.multiSide then return mon.multiSide end
+      return nativeSideOfMulti(self, mon)
+    end
   end
 
   -- resolveMoveTargets(battle, caster, moveId, chosenTarget) -> array of
@@ -292,5 +295,5 @@ return function(mod)
     return liveEnemies[1]
   end
 
-  mod.log:info("g9-battle-engine-beta: move_targeting installed (resolveMoveTargets, isSpreadMove, allActiveBattlers, N-way Battle:sideOf, faint-redirect helpers)")
+  mod.log:info("g9-battle-engine: move_targeting installed (resolveMoveTargets, isSpreadMove, allActiveBattlers, N-way Battle:sideOf, faint-redirect helpers)")
 end

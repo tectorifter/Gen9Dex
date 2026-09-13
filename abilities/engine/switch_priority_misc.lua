@@ -333,7 +333,7 @@ return function(mod, data)
     return 0
   end)
 
-  mod.log:info("g9-battle-engine-beta: switch_priority_misc installed (DOWNLOAD, MOODY, "
+  mod.log:info("g9-battle-engine: switch_priority_misc installed (DOWNLOAD, MOODY, "
     .. "CURIOUSMEDICINE, COSTAR, BEASTBOOST, EELEVATE, SUPREMEOVERLORD, STALL, QUICKDRAW, "
     .. "MYCELIUMMIGHT [priority half], BATTLEBOND, SPEEDBOOST)")
 end

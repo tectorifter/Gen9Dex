@@ -35,8 +35,10 @@
 --     has no base stat, it's stage-only (gen2/Battle.lua's own
 --     vanillaAccuracyRoll reads self.stages[side].evasion directly, never
 --     battleStat), so this doesn't route through the same primitive at
---     all -- needs the separate "battle.accuracy" hook instead, real,
---     more invasive work, not yet built.
+--     all. UN-DEFERRED (Phase 11): they are built on the separate
+--     "battle.accuracy" hook in abilities/engine/accuracy_multiplier.lua
+--     as the attacker-side accuracy reduction Showdown's own
+--     onModifyAccuracy applies (x0.8 / x0.8 / x0.5).
 --   SLOWSTART (atk x0.5 + speed x0.5, first 5 turns after switch-in) --
 --     needs a turns-since-switch-in counter this mod doesn't track for
 --     any ability yet.
@@ -85,4 +87,10 @@ return {
   PUREPOWER = true, GORILLATACTICS = true, QUICKFEET = true,
   PROTOSYNTHESIS = true, QUARKDRIVE = true,
   GUTS = true, MARVELSCALE = true, GRASSPELT = true, MINUS = true, PLUS = true,
+  -- Hadron Engine: Orichalcum Pulse's exact twin -- its set_terrain half is
+  -- already wired (terrain_switchin.lua), but the Sp. Atk half was missing
+  -- from this inclusion list entirely (found while wiring Orichalcum's own
+  -- stat_multiplier into damage, 2026-09-10), so the twin ability's sub-
+  -- effect did nothing at all. Same real shape: Electric Terrain, SpA x4/3.
+  HADRONENGINE = true,
 }

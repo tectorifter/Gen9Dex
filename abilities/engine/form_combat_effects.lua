@@ -115,7 +115,7 @@ return function(mod, data)
     local ok, dmg, info = pcall(next, ctx)
     move.type = origType
     if not ok then
-      mod.log:warn("g9-battle-engine-beta: form_combat_effects Hunger Switch failed: %s", tostring(dmg))
+      mod.log:warn("g9-battle-engine: form_combat_effects Hunger Switch failed: %s", tostring(dmg))
       return 0, { crit = false, typeMult = 0 }
     end
     return dmg, info
@@ -136,11 +136,14 @@ return function(mod, data)
     if not (maxHp and maxHp > 0) then return end
     mon.ggdGulpLoaded = (m.hp or 0) * 2 > maxHp and "gorging" or "gulping"
   end
-  local Battle = require("src.battle.gen2.Battle")
-  local nativeUseMoveGulp = Battle.useMove
-  function Battle:useMove(attacker, defender, moveId)
-    if attacker and GULP_MOVES[moveId] then loadGulpMissile(attacker, true) end
-    return nativeUseMoveGulp(self, attacker, defender, moveId)
+  local gen2BattleOk, Battle = pcall(require, "src.battle.gen2.Battle")
+  Battle = gen2BattleOk and Battle or nil
+  if Battle then
+    local nativeUseMoveGulp = Battle.useMove
+    function Battle:useMove(attacker, defender, moveId)
+      if attacker and GULP_MOVES[moveId] then loadGulpMissile(attacker, true) end
+      return nativeUseMoveGulp(self, attacker, defender, moveId)
+    end
   end
   local BattleState = require("src.battle.BattleState")
   local nativePerformMoveGulp = BattleState.performMove
@@ -295,6 +298,6 @@ return function(mod, data)
     end
   end)
 
-  mod.log:info("g9-battle-engine-beta: form_combat_effects installed (RKSSYSTEM, HUNGERSWITCH, "
+  mod.log:info("g9-battle-engine: form_combat_effects installed (RKSSYSTEM, HUNGERSWITCH, "
     .. "GULPMISSILE, COMMANDER, TERASHELL, TERAFORMZERO, EMBODYASPECT)")
 end

@@ -78,44 +78,265 @@
 -- applied the effect is swapped out. Restored immediately after, even on
 -- error.
 return function(mod)
-  local Battle = require("src.battle.gen2.Battle")
+  local gen2Ok_Battle, Battle = pcall(require, "src.battle.gen2.Battle")
+  Battle = gen2Ok_Battle and Battle or nil
   local PROTECT_EFFECT_ID = "GMAX_PROTECT_EFFECT"
+  local ENDURE_EFFECT_ID = "GMAX_ENDURE_EFFECT"
   local MAX_GUARD_EFFECT_ID = "GMAX_MAX_GUARD_EFFECT"
   local MAX_GUARD_MOVE_ID = "BATTLE_FORMS_MAXGUARD"
 
   ------------------------------------------------------------------
-  -- Part A: Protect's own move -- the real decaying success chain
-  -- (Showdown's exact "stall" volatile, matching Bulbapedia's documented
-  -- values): 100% on first use or after a break in the chain, 1/3 on the
-  -- second consecutive use, 1/9 on the third, and so on, capped at
-  -- 1/729. Resets to 100% on failure OR on any turn gap (not used last
-  -- turn).
+  -- Shared Protect-family "stall" chain -- the real Pokemon Showdown
+  -- rule (data/conditions.ts's own `stall` condition: counter starts at
+  -- 3, triples on each consecutive use, counterMax 729, deleted on any
+  -- failed roll). Mapped onto this engine as: chance is 100% on the
+  -- first use (or after any break in the chain), then 1/3, 1/9, 1/27,
+  -- ... capped at 1/729; a failed use OR a turn gap resets it to 100%.
+  -- `protectChainX` is the next roll's denominator and `protectChainTurn`
+  -- is the last turn the chain succeeded; the two together encode
+  -- Showdown's counter one-to-one (fresh chain -> x = 1, then 3, 9, ...).
+  --
+  -- REAL BUG FIXED HERE (2026-09-10, direct user report -- "protect and
+  -- other protection similar moves might not have their 'succesful uses
+  -- lower next pass chance to X pass chance' base on pokemon showdown
+  -- formula for them"). Both run() handlers below used to compare/assign
+  -- `battle.turnCount`, a field that DOES NOT EXIST on gen2/Battle.lua's
+  -- battle object -- confirmed by direct read of the base engine, which
+  -- only ever has `self.turn` (`self.turn = 0` at :294, incremented once
+  -- per turn at the top of runTurn, :4737). So `(battle.turnCount or 0)
+  -- - 1` was always -1, `consecutive` was ALWAYS false, `x` was ALWAYS
+  -- 1, and `battle:roller()(1) == 0` always succeeded: Protect and Max
+  -- Guard could never decay and never fail, exactly the reported symptom.
+  -- Only the field name was wrong; the formula's own values already
+  -- matched Showdown.
+  --
+  -- One chain per Pokemon, shared across the WHOLE family (Protect,
+  -- Detect, Endure, Spiky Shield, Baneful Bunker, King's Shield, Silk
+  -- Trap, Burning Bulwark, Obstruct, Max Guard), exactly as real games
+  -- and Showdown treat it -- which is why this is a single shared helper
+  -- rather than each effect carrying its own copy.
+  ------------------------------------------------------------------
+  local CHAIN_CAP = 729
+  local function rollStall(battle, user)
+    local turn = battle.turn or 0
+    local consecutive = user.protectChainTurn ~= nil
+      and user.protectChainTurn == turn - 1
+    local x = (consecutive and user.protectChainX) or 1
+    local success = battle:roller()(x) == 0
+    if success then
+      user.protectChainX = math.min(x * 3, CHAIN_CAP)
+      user.protectChainTurn = turn
+    else
+      -- Showdown's onStallMove deletes the `stall` volatile on failure,
+      -- so the NEXT protection use starts a fresh 100% chain -- clear
+      -- BOTH fields (the old code left protectChainTurn behind).
+      user.protectChainX = nil
+      user.protectChainTurn = nil
+    end
+    return success
+  end
+
+  ------------------------------------------------------------------
+  -- Phase 22 export: the Guard family (Wide Guard / Quick Guard) shares
+  -- Showdown's own `stall` volatile with the whole Protect family --
+  -- their `onHitSide(side, source)` is literally `source.addVolatile
+  -- ('stall')` (moves.ts:20827 / :14507). Adding a volatile that is
+  -- already active is a no-op in Showdown, which is exactly what this
+  -- mirrors: if the user already has a live chain from last turn, leave
+  -- it alone; otherwise start one at 3 (Showdown's own `onStart`
+  -- counter), i.e. the same state rollStall writes after a first
+  -- success. Kept here, beside rollStall, so the field names live in one
+  -- place and a future member of the family never re-derives them.
+  ------------------------------------------------------------------
+  function mod.exports.armStallChain(battle, user)
+    if not (battle and user) then return end
+    local turn = battle.turn or 0
+    if user.protectChainTurn ~= nil and user.protectChainTurn == turn - 1 then
+      return -- already active this chain; addVolatile('stall') no-ops
+    end
+    user.protectChainX = 3
+    user.protectChainTurn = turn
+  end
+
+  ------------------------------------------------------------------
+  -- Contact-triggered riders for the shield family, transcribed from
+  -- Showdown's own data/moves.ts condition blocks (fetched to
+  -- scratch/protect-family-showdown.txt, 2026-09-10). `stat` changes go
+  -- through this mod's shared changeStage primitive -- or Gen 2's native
+  -- changeStageAgainstMist for the one NATIVE stat, Speed -- and
+  -- `status` goes through Battle:applyStatus; both already respect every
+  -- real interaction (Mist/Substitute, Clear Body, Contrary/Simple,
+  -- Mirror Armor, the status-immunity abilities). `fraction` is Spiky
+  -- Shield's own 1/8 max-HP chip, written flat exactly as
+  -- abilities/engine/contact_retaliation.lua's Iron Barbs/Aftermath
+  -- already do (writing hp directly avoids recursing back through the
+  -- very battle.damage hook this rider runs inside).
+  ------------------------------------------------------------------
+  local SHIELD_RIDERS = {
+    KINGSSHIELD = { stat = "attack", stages = -1 },
+    OBSTRUCT = { stat = "defense", stages = -2 },
+    SILKTRAP = { stat = "speed", stages = -1, native = true },
+    SPIKYSHIELD = { fraction = 1 / 8 },
+    BANEFULBUNKER = { status = "poison" },
+    BURNINGBULWARK = { status = "burn" },
+  }
+
+  -- Gen 1 exposes curTypes, Gen 2's mon carries .types; accept either so
+  -- the same check works here and in the fengari harness.
+  local function liveTypes(who)
+    local t = who and (who.types or who.curTypes)
+    if (not t or #t == 0) and mod.exports.curTypesOf then
+      t = mod.exports.curTypesOf(who, true)
+    end
+    return t or {}
+  end
+
+  local function hasType(who, want)
+    for _, t in ipairs(liveTypes(who)) do
+      if t == want then return true end
+    end
+    return false
+  end
+
+  local function applyShieldRider(battle, attacker, shieldOwner, shieldMoveId, blockedMoveId, turn)
+    if not (battle and attacker and shieldOwner and shieldMoveId) then return end
+    local rider = SHIELD_RIDERS[shieldMoveId]
+    if not rider then return end
+    -- Every rider is contact-only in Showdown (checkMoveMakesContact).
+    local makesContact = mod.exports.makesContact
+    if not (makesContact and blockedMoveId and makesContact(blockedMoveId, attacker)) then
+      return
+    end
+    -- Fire once per (turn, attacker) for this shield even if the engine
+    -- routes the same move through battle.damage more than once
+    -- (multi-hit moves call it per hit); Showdown's onTryHit fires once
+    -- per move.
+    turn = turn or 0
+    shieldOwner.protectRiderKeys = shieldOwner.protectRiderKeys or {}
+    local key = tostring(turn) .. ":" .. tostring(attacker)
+    if shieldOwner.protectRiderKeys[key] then return end
+    shieldOwner.protectRiderKeys[key] = true
+
+    if rider.stat then
+      if rider.native then
+        -- Speed/accuracy/evasion are NATIVE stats this mod never tracks
+        -- through changeStage -- Gen 2's own changeStageAgainstMist is
+        -- the proven route (and emits its own message). The shield owner
+        -- is passed as the `attacker` argument so the drop is Mist-gated
+        -- as hostile, exactly like every other hostile Speed drop here.
+        battle:changeStageAgainstMist(shieldOwner, attacker, rider.stat, rider.stages)
+      else
+        local changeStage = mod.exports.changeStage
+        if changeStage then
+          for _, line in ipairs(changeStage(battle, attacker, rider.stat, rider.stages, true, true) or {}) do
+            battle:emit({ kind = "message", text = line })
+          end
+        end
+      end
+    elseif rider.fraction then
+      local m = attacker.mon or attacker
+      local maxHp = m.stats and m.stats.hp
+      if maxHp and maxHp > 0 then
+        m.hp = math.max(0, (m.hp or 0) - math.max(1, math.floor(maxHp * rider.fraction)))
+        battle:emit({ kind = "message",
+          text = battle:monName(attacker) .. " was hurt!" })
+      end
+    elseif rider.status then
+      -- applyStatus enforces ability immunity (status_immunity.lua) and
+      -- the one-status-at-a-time + Safeguard rules natively, but NOT
+      -- type immunity -- confirmed by direct read of gen2/Battle.lua
+      -- :3396-3438 -- so it is checked here via the one shared helper
+      -- (Phase 11: combat/modern_combat.lua's own statusTypeImmune):
+      -- Fire can never be burned, Poison/Steel can never be poisoned.
+      -- The shield owner is the inflicting SOURCE here, so Corrosion's
+      -- real pierce of the poison half (Showdown sim/pokemon.ts:1710)
+      -- still applies.
+      local statusTypeImmune = mod.exports.statusTypeImmune
+      local corrosionPiercesPoison = mod.exports.corrosionPiercesPoison
+      local immune = statusTypeImmune and statusTypeImmune(battle, attacker, rider.status)
+      local pierce = immune and corrosionPiercesPoison
+        and corrosionPiercesPoison(shieldOwner)
+      if not (immune and not pierce) then
+        battle:applyStatus(attacker, rider.status, shieldOwner)
+      end
+    end
+  end
+
+  ------------------------------------------------------------------
+  -- Part A: Protect's own move, plus every other block-shield move,
+  -- sharing the one stall chain above. Detect (functionCode
+  -- "ProtectUser", the same as Protect's own) is mechanically identical
+  -- in every real generation -- same chain, same target flag. King's
+  -- Shield, Spiky Shield, Baneful Bunker, Silk Trap, Burning Bulwark and
+  -- Obstruct were previously NOT wired at all: national_dex hands them
+  -- effect = "EFFECT_NORMAL_HIT" (confirmed by direct dump of
+  -- data/moves/generated/registry_gen2.lua), a dead no-op for a power-0
+  -- move, so they neither protected nor had a chain to decay. Each id's
+  -- own contact rider (SHIELD_RIDERS above) is applied by Part B/Part D
+  -- when the shield actually blocks a move.
   ------------------------------------------------------------------
   mod.content.move_effects:register(PROTECT_EFFECT_ID, {
     kind = "primary",
-    run = function(battle, user)
-      local consecutive = user.protectChainTurn == (battle.turnCount or 0) - 1
-      local x = (consecutive and user.protectChainX) or 1
-      local success = battle:roller()(x) == 0
-      if success then
+    run = function(battle, user, defender, def, moveId, sureHit)
+      if rollStall(battle, user) then
         user.protected = true
-        user.protectChainX = math.min(x * 3, 729)
-        user.protectChainTurn = battle.turnCount
+        user.protectShield = moveId
         battle:emit({ kind = "message",
           text = battle:monName(user) .. " protected itself!" })
       else
-        user.protectChainX = nil
         battle:emit({ kind = "message", text = "But it failed!" })
       end
     end,
   })
-  mod.content.moves:patch("PROTECT", { effect = PROTECT_EFFECT_ID })
-  -- Detect (functionCode "ProtectUser", the same as Protect's own) is
-  -- mechanically identical to Protect in every real generation -- same
-  -- decaying success chain, same target flag. Phase 3 of the move-effect
-  -- completion pipeline: this was the one line missing, moves_new.lua's
-  -- own DETECT entry (priority 4, correct already) needed no other change.
-  mod.content.moves:patch("DETECT", { effect = PROTECT_EFFECT_ID })
+  local BLOCK_SHIELD_MOVES = {
+    "PROTECT", "DETECT", "KINGSSHIELD", "SPIKYSHIELD", "BANEFULBUNKER",
+    "SILKTRAP", "BURNINGBULWARK", "OBSTRUCT",
+  }
+  do
+    -- Patched id-by-id, each pcall-guarded, so one unexpected/missing id
+    -- can never abort the rest of this file's install (see the file
+    -- header's own warning about that exact failure mode).
+    local patched = 0
+    for _, shieldMoveId in ipairs(BLOCK_SHIELD_MOVES) do
+      local ok = pcall(function()
+        mod.content.moves:patch(shieldMoveId, { effect = PROTECT_EFFECT_ID })
+      end)
+      if ok then patched = patched + 1
+      else mod.log:warn("galar_gmax_dex: modern_combat_protect: could not patch %s", shieldMoveId) end
+    end
+    mod.log:info("galar_gmax_dex: modern_combat_protect: wired %d block-shield move(s) to the shared stall chain",
+      patched)
+  end
+
+  ------------------------------------------------------------------
+  -- Endure: shares the exact same stall chain (Showdown's own
+  -- onPrepareHit/onHit are byte-identical to Protect's), but sets no
+  -- blocking flag -- instead it arms Gen 2's native `endure` volatile,
+  -- which Battle:dealDamage already reads to clamp a lethal hit to 1 HP
+  -- ("<mon> endured the hit!", gen2/Battle.lua's dealDamage Endure arm).
+  -- Also previously unwired (national_dex: "EFFECT_NORMAL_HIT"), so
+  -- Endure did nothing at all.
+  ------------------------------------------------------------------
+  mod.content.move_effects:register(ENDURE_EFFECT_ID, {
+    kind = "primary",
+    run = function(battle, user, defender, def, moveId, sureHit)
+      if rollStall(battle, user) then
+        battle:volatile(user).endure = true
+        battle:emit({ kind = "message",
+          text = battle:monName(user) .. " braced itself!" })
+      else
+        battle:emit({ kind = "message", text = "But it failed!" })
+      end
+    end,
+  })
+  do
+    local ok = pcall(function()
+      mod.content.moves:patch("ENDURE", { effect = ENDURE_EFFECT_ID })
+    end)
+    if not ok then
+      mod.log:warn("galar_gmax_dex: modern_combat_protect: could not patch ENDURE")
+    end
+  end
 
   ------------------------------------------------------------------
   -- Part A2: Max Guard, rebuilt onto this same Protect chain instead of
@@ -143,19 +364,14 @@ return function(mod)
   ------------------------------------------------------------------
   mod.content.move_effects:register(MAX_GUARD_EFFECT_ID, {
     kind = "primary",
-    run = function(battle, user)
+    run = function(battle, user, defender, def, moveId, sureHit)
       mod.log:info("galar_gmax_dex: modern_combat_protect: [diag] Max Guard run() reached")
-      local consecutive = user.protectChainTurn == (battle.turnCount or 0) - 1
-      local x = (consecutive and user.protectChainX) or 1
-      local success = battle:roller()(x) == 0
-      if success then
+      if rollStall(battle, user) then
         user.maxGuarded = true
-        user.protectChainX = math.min(x * 3, 729)
-        user.protectChainTurn = battle.turnCount
+        user.protectShield = moveId
         battle:emit({ kind = "message",
           text = battle:monName(user) .. " protected itself!" })
       else
-        user.protectChainX = nil
         battle:emit({ kind = "message", text = "But it failed!" })
       end
     end,
@@ -193,7 +409,7 @@ return function(mod)
   -- genuine two-mod cycle -- confirmed the loader breaks exactly this
   -- shape deliberately rather than failing (Loader.lua:766-774,
   -- "optional dependency loop broken at %s", alphabetically-first id
-  -- wins) -- "battle_forms" sorts before "g9-battle-engine-beta", so the
+  -- wins) -- "battle_forms" sorts before "g9-battle-engine", so the
   -- cycle resolves in the direction this file's own patch below needs.
   mod.content.moves:patch(MAX_GUARD_MOVE_ID, { effect = MAX_GUARD_EFFECT_ID, priority = 4 })
 
@@ -280,6 +496,14 @@ return function(mod)
         dmg = math.floor((dmg or 0) * 0.25 + 0.5)
         return dmg, info
       end
+      -- Fully blocked: fire this shield's own contact rider (King's
+      -- Shield/Obstruct attack/defense drop, Silk Trap Speed drop,
+      -- Spiky Shield 1/8 chip, Baneful Bunker/Burning Bulwark status).
+      -- Only reached on a real, full block -- a bypass (Feint/Z-Move,
+      -- Unseen Fist) or the 25% Max-move branch above is NOT a block, so
+      -- no rider, matching Showdown's onTryHit early-returns.
+      applyShieldRider(ctx.battle, ctx.user, target, target.protectShield,
+        ctx.move and ctx.move.id, ctx.battle and ctx.battle.turn)
       return 0, { crit = false, typeMult = 0 }
     end
 
@@ -300,6 +524,8 @@ return function(mod)
       if not who then return end
       who.protected = nil
       who.maxGuarded = nil
+      who.protectShield = nil
+      who.protectRiderKeys = nil
     end
     clear(battle.player)
     clear(battle.enemy)
@@ -418,37 +644,44 @@ return function(mod)
   -- attacker` already excludes it without needing to name PROTECT_
   -- EFFECT_ID/MAX_GUARD_EFFECT_ID specifically.
   ------------------------------------------------------------------
-  local nativeUseMove = Battle.useMove
-  local nativeMoveEffectRecordFor = Battle.moveEffectRecordFor
-  function Battle:useMove(attacker, defender, moveId)
-    local blockable = defender and defender ~= attacker
-      and (defender.protected or defender.maxGuarded)
-    if not blockable then
-      return nativeUseMove(self, attacker, defender, moveId)
-    end
-    local ok, def = pcall(function() return self:moveDef(moveId) end)
-    if not (ok and def and (def.power or 0) == 0 and not def.bypassesProtect) then
-      return nativeUseMove(self, attacker, defender, moveId)
-    end
-    Battle.moveEffectRecordFor = function(data, effect)
-      local real = nativeMoveEffectRecordFor(data, effect)
-      if real and (real.kind == "primary" or real.kind == "secondary") then
-        return {
-          kind = "primary",
-          run = function(battle)
-            battle:emit({ kind = "message",
-              text = "It doesn't affect " .. battle:monName(defender) .. "..." })
-          end,
-        }
+  if Battle then
+    local nativeUseMove = Battle.useMove
+    local nativeMoveEffectRecordFor = Battle.moveEffectRecordFor
+    function Battle:useMove(attacker, defender, moveId)
+      local blockable = defender and defender ~= attacker
+        and (defender.protected or defender.maxGuarded)
+      if not blockable then
+        return nativeUseMove(self, attacker, defender, moveId)
       end
-      return real
-    end
-    local callOk, callErr = pcall(nativeUseMove, self, attacker, defender, moveId)
-    Battle.moveEffectRecordFor = nativeMoveEffectRecordFor
-    if not callOk then
-      mod.log:warn("galar_gmax_dex: modern_combat_protect: status-move block-check errored (%s)",
-        tostring(callErr))
-      error(callErr, 0)
+      local ok, def = pcall(function() return self:moveDef(moveId) end)
+      if not (ok and def and (def.power or 0) == 0 and not def.bypassesProtect) then
+        return nativeUseMove(self, attacker, defender, moveId)
+      end
+      Battle.moveEffectRecordFor = function(data, effect)
+        local real = nativeMoveEffectRecordFor(data, effect)
+        if real and (real.kind == "primary" or real.kind == "secondary") then
+          return {
+            kind = "primary",
+            run = function(battle)
+              battle:emit({ kind = "message",
+                text = "It doesn't affect " .. battle:monName(defender) .. "..." })
+              -- A blocked status move still triggers a contact shield's
+              -- rider if it makes contact (Showdown's onTryHit fires for
+              -- any blocked move, status or damaging alike).
+              applyShieldRider(battle, attacker, defender, defender.protectShield,
+                moveId, battle.turn)
+            end,
+          }
+        end
+        return real
+      end
+      local callOk, callErr = pcall(nativeUseMove, self, attacker, defender, moveId)
+      Battle.moveEffectRecordFor = nativeMoveEffectRecordFor
+      if not callOk then
+        mod.log:warn("galar_gmax_dex: modern_combat_protect: status-move block-check errored (%s)",
+          tostring(callErr))
+        error(callErr, 0)
+      end
     end
   end
 

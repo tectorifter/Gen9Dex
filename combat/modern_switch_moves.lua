@@ -109,21 +109,24 @@ return function(mod)
   -- rather than silently folded into this fix.
   ------------------------------------------------------------------
   do
-    local Battle = require("src.battle.gen2.Battle")
-    mod.content.move_effects:register("G9_TELEPORT_EFFECT", {
-      kind = "primary",
-      run = function(battle, attacker, defender, def, moveId, sureHit)
-        if not battle.wild then
-          battle:emit({ kind = "message", text = battle:monName(attacker) .. " teleported away!" })
-          mod.exports.requestSwitch(battle, attacker, { reason = moveId })
-          return
-        end
-        local native = Battle.MOVE_EFFECT_RECORDS.EFFECT_TELEPORT
-        return native and native.run and native.run(battle, attacker, defender, def, moveId, sureHit)
-      end,
-    })
-    mod.content.moves:patch("TELEPORT", { effect = "G9_TELEPORT_EFFECT" })
-  end
+    local gen2Ok_Battle, Battle = pcall(require, "src.battle.gen2.Battle")
+    Battle = gen2Ok_Battle and Battle or nil
+    if Battle then
+      mod.content.move_effects:register("G9_TELEPORT_EFFECT", {
+        kind = "primary",
+        run = function(battle, attacker, defender, def, moveId, sureHit)
+          if not battle.wild then
+            battle:emit({ kind = "message", text = battle:monName(attacker) .. " teleported away!" })
+            mod.exports.requestSwitch(battle, attacker, { reason = moveId })
+            return
+          end
+          local native = Battle.MOVE_EFFECT_RECORDS.EFFECT_TELEPORT
+          return native and native.run and native.run(battle, attacker, defender, def, moveId, sureHit)
+        end,
+      })
+      mod.content.moves:patch("TELEPORT", { effect = "G9_TELEPORT_EFFECT" })
+    end
+    end
 
-  mod.log:info("g9-battle-engine-beta: modern_switch_moves installed (UTURN, VOLTSWITCH, FLIPTURN, PARTINGSHOT, TELEPORT)")
+  mod.log:info("g9-battle-engine: modern_switch_moves installed (UTURN, VOLTSWITCH, FLIPTURN, PARTINGSHOT, TELEPORT)")
 end

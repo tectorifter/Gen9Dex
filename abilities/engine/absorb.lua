@@ -110,5 +110,5 @@ return function(mod, data)
     for _, mon in ipairs(battle.enemyParty or {}) do clearCharge(battle, mon, gen2) end
   end)
 
-  mod.log:info("g9-battle-engine-beta: absorb installed (FLASHFIRE, MOTORDRIVE, LIGHTNINGROD, STORMDRAIN)")
+  mod.log:info("g9-battle-engine: absorb installed (FLASHFIRE, MOTORDRIVE, LIGHTNINGROD, STORMDRAIN)")
 end

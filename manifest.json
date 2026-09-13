@@ -1,12 +1,13 @@
 {
-  "id": "g9-battle-engine-beta",
-  "name": "g9-battle-engine-beta",
-  "version": "2.3.0",
+  "id": "g9-battle-engine",
+  "name": "g9-battle-engine",
+  "version": "4.0.3",
   "api": 2,
   "entry": "main.lua",
   "profile": "content",
   "game_version": ">=0.1.45",
   "games": [
+    "gen1",
     "gen2"
   ],
   "category": "GAMEPLAY",
@@ -20,7 +21,7 @@
   "optional_dependencies": [
     "battle_forms"
   ],
-  "description": "4 gimmicks, updated battle engine -- moves/stats/gigantamax combat only, no sprites, no overworld spawns, no followers (see g9-battle-engine for those).",
+  "description": "4 gimmicks, updated battle engine -- moves/stats/gigantamax combat only, no sprites, no overworld spawns, no followers.",
   "options_schema": "options.lua",
   "repo": "https://github.com/tectorifter/Gen9Dex",
   "experimental": false,

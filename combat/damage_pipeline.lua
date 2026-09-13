@@ -84,10 +84,14 @@ return function(mod)
       M_DAMAGE_PIPELINE.ability_system.dispatch(ev)
     end
 
-    -- 4. Damage reflection (Rough Skin / Counter / Mirror Coat...)
+    -- 4. Damage reflection (Counter family only). Contact recoil -- Iron
+    -- Barbs / Rough Skin (abilities/engine/contact_retaliation.lua) and
+    -- Rocky Helmet (combat/modern_held_items_phase2.lua) -- is applied as
+    -- real secondary damage from the post-hit `battle.damage_dealt` event,
+    -- never from inside this wrap (that would re-enter battle.damage).
     local reflect = damage_reflection.calculate(ev)
     if reflect and reflect.reflected then
-      mod.log:info(string.format("Damage reflected: %d from %s", reflect.damage, reflect.source))
+      mod.log:info(string.format("Damage reflection: %d from %s (move-owned)", reflect.damage, reflect.source))
     end
 
     return dmg, info

@@ -17,5 +17,5 @@ return function(mod, data)
     end
   end
 
-  mod.log:info("g9-battle-engine-beta: skill_link installed (SKILLLINK, Gen 1 only)")
+  mod.log:info("g9-battle-engine: skill_link installed (SKILLLINK, Gen 1 only)")
 end

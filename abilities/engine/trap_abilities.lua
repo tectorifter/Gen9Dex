@@ -69,7 +69,9 @@ return function(mod, data)
   end
   mod.exports.trapAbilityBlocks = trapAbilityBlocks
 
-  local Battle = require("src.battle.gen2.Battle")
+  local gen2BattleOk, Battle = pcall(require, "src.battle.gen2.Battle")
+  Battle = gen2BattleOk and Battle or nil
+  if Battle then
   local nativeSwitchLocked = Battle.switchLocked
   function Battle:switchLocked()
     if nativeSwitchLocked(self) then return true end
@@ -90,6 +92,7 @@ return function(mod, data)
     end
     return false
   end
+  end
 
-  mod.log:info("g9-battle-engine-beta: trap_abilities installed (ARENATRAP, SHADOWTAG, MAGNETPULL, RUNAWAY -- Gen 2 only)")
+  mod.log:info("g9-battle-engine: trap_abilities installed (ARENATRAP, SHADOWTAG, MAGNETPULL, RUNAWAY -- Gen 2 only)")
 end

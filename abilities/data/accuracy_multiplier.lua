@@ -20,6 +20,28 @@
 -- a real, unconditional guaranteed hit for either side of the matchup,
 -- not a multiplier -- see abilities/engine/accuracy_multiplier.lua's own
 -- comment for why it can't be expressed as one.
+--
+-- Phase 11 (ability gaps close-out) additions -- the two remaining real
+-- accuracy/evasion families, both on the same "battle.accuracy" hook:
+--   SANDVEIL / SNOWCLOAK / TANGLEDFEET (accuracy x0.8 in a
+--     sandstorm/snow, x0.5 while confused, applied when the holder is
+--     the DEFENDER). national_dex carries these as `stat_multiplier`
+--     on `evasion` (1.25/1.25/2), the one stat the stat_multiplier
+--     engine left deferred because evasion has no base stat; the
+--     engine here converts them to the attacker's accuracy reduction
+--     Showdown's own onModifyAccuracy actually applies.
+--   KEENEYE / ILLUMINATE / MINDSEYE / UNAWARE (Showdown's
+--     `move.ignoreEvasion` family -- the holder's attacks ignore the
+--     target's evasion STAGE entirely; Unaware's own defender-side half
+--     additionally ignores the attacker's accuracy STAGE). These are
+--     not multipliers, so the engine implements them by zeroing the
+--     native stage for the duration of the roll.
+-- (MINDSEYE's Normal/Fighting-hits-Ghost half and its accuracy-can't-be-
+-- lowered half live elsewhere: combat/modern_status_volatiles.lua's
+-- type_immunity_negation and combat/modern_combat.lua's
+-- statDropBlockedByAbility respectively.)
 return {
   COMPOUNDEYES = true, HUSTLE = true, VICTORYSTAR = true, NOGUARD = true,
+  SANDVEIL = true, SNOWCLOAK = true, TANGLEDFEET = true,
+  KEENEYE = true, ILLUMINATE = true, MINDSEYE = true, UNAWARE = true,
 }

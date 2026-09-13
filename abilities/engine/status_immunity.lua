@@ -204,7 +204,8 @@ return function(mod, data)
   -- wraps (both mods' checks run; either one blocking is enough).
   ------------------------------------------------------------------
   local StatusRegistry = require("src.battle.StatusRegistry")
-  local Battle = require("src.battle.gen2.Battle")
+  local gen2BattleOk, Battle = pcall(require, "src.battle.gen2.Battle")
+  Battle = gen2BattleOk and Battle or nil
 
   -- target here is the battler itself (StatusRegistry.lua's own body
   -- reads target.mon.status/target.curTypes/target.substituteHP
@@ -219,12 +220,14 @@ return function(mod, data)
     return nativeStatusInflict(battle, target, status, opts)
   end
 
-  local nativeApplyStatus = Battle.applyStatus
-  function Battle:applyStatus(mon, status, source)
-    local canonical = STATUS_ALIASES[status]
-    if canonical and hasStatusImmunity(mon, canonical, self) then return false end
-    return nativeApplyStatus(self, mon, status, source)
+  if Battle then
+    local nativeApplyStatus = Battle.applyStatus
+    function Battle:applyStatus(mon, status, source)
+      local canonical = STATUS_ALIASES[status]
+      if canonical and hasStatusImmunity(mon, canonical, self) then return false end
+      return nativeApplyStatus(self, mon, status, source)
+    end
   end
 
-  mod.log:info("g9-battle-engine-beta: status_immunity installed (12 abilities: INNERFOCUS, MAGMAARMOR, LIMBER, OWNTEMPO, PURIFYINGSALT, SWEETVEIL, VITALSPIRIT, THERMALEXCHANGE, WATERVEIL, WATERBUBBLE, PASTELVEIL, LEAFGUARD)")
+  mod.log:info("g9-battle-engine: status_immunity installed (12 abilities: INNERFOCUS, MAGMAARMOR, LIMBER, OWNTEMPO, PURIFYINGSALT, SWEETVEIL, VITALSPIRIT, THERMALEXCHANGE, WATERVEIL, WATERBUBBLE, PASTELVEIL, LEAFGUARD)")
 end

@@ -57,5 +57,5 @@ return function(mod, data)
     end
   end)
 
-  mod.log:info("g9-battle-engine-beta: ko_boost installed (MOXIE, CHILLINGNEIGH, GRIMNEIGH, SOULHEART)")
+  mod.log:info("g9-battle-engine: ko_boost installed (MOXIE, CHILLINGNEIGH, GRIMNEIGH, SOULHEART)")
 end

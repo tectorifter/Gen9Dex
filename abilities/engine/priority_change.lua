@@ -106,24 +106,27 @@ return function(mod, data)
   -- apply, the same monkeypatch-chain convention this whole mod already
   -- uses throughout).
   ------------------------------------------------------------------
-  local Battle = require("src.battle.gen2.Battle")
-  local nativeUseMove = Battle.useMove
-  function Battle:useMove(attacker, defender, moveId)
-    if defender and defender ~= attacker and abilityIdOf(attacker) == "PRANKSTER"
-        and pranksterBoosts(moveId) then
-      local info = moveById(moveId)
-      if info and info.target == "selected-pokemon" then
-        local gen2 = isGen2Battle(self)
-        for _, t in ipairs(curTypesOf(defender, gen2)) do
-          if t == "DARK" then
-            self:emit({ kind = "message", text = "But, it failed!" })
-            return
+  local gen2BattleOk, Battle = pcall(require, "src.battle.gen2.Battle")
+  Battle = gen2BattleOk and Battle or nil
+  if Battle then
+    local nativeUseMove = Battle.useMove
+    function Battle:useMove(attacker, defender, moveId)
+      if defender and defender ~= attacker and abilityIdOf(attacker) == "PRANKSTER"
+          and pranksterBoosts(moveId) then
+        local info = moveById(moveId)
+        if info and info.target == "selected-pokemon" then
+          local gen2 = isGen2Battle(self)
+          for _, t in ipairs(curTypesOf(defender, gen2)) do
+            if t == "DARK" then
+              self:emit({ kind = "message", text = "But, it failed!" })
+              return
+            end
           end
         end
       end
+      return nativeUseMove(self, attacker, defender, moveId)
     end
-    return nativeUseMove(self, attacker, defender, moveId)
   end
 
-  mod.log:info("g9-battle-engine-beta: priority_change installed (PRANKSTER, TRIAGE, GALEWINGS + Prankster/Dark-type immunity)")
+  mod.log:info("g9-battle-engine: priority_change installed (PRANKSTER, TRIAGE, GALEWINGS + Prankster/Dark-type immunity)")
 end

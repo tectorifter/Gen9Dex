@@ -64,13 +64,16 @@ return function(mod)
   -- order among all of them only changes which layer runs closest to
   -- the real native call, never correctness).
   ------------------------------------------------------------------
-  local Battle = require("src.battle.gen2.Battle")
-  local nativeUseMoveRecorder = Battle.useMove
-  function Battle:useMove(attacker, defender, moveId)
-    if attacker and defender and attacker ~= defender then
-      mod.exports.recordInteraction(self, attacker, defender, "move", moveId)
+  local gen2BattleOk, Battle = pcall(require, "src.battle.gen2.Battle")
+  Battle = gen2BattleOk and Battle or nil
+  if Battle then
+    local nativeUseMoveRecorder = Battle.useMove
+    function Battle:useMove(attacker, defender, moveId)
+      if attacker and defender and attacker ~= defender then
+        mod.exports.recordInteraction(self, attacker, defender, "move", moveId)
+      end
+      return nativeUseMoveRecorder(self, attacker, defender, moveId)
     end
-    return nativeUseMoveRecorder(self, attacker, defender, moveId)
   end
 
   local BattleState = require("src.battle.BattleState")
@@ -82,6 +85,6 @@ return function(mod)
     return nativePerformMoveRecorder(self, user, target, moveInst, isCalled)
   end
 
-  mod.log:info("g9-battle-engine-beta: interaction_memory installed "
+  mod.log:info("g9-battle-engine: interaction_memory installed "
     .. "(recordInteraction, lastInteractionAgainst, 8-slot per-battle ring buffer)")
 end

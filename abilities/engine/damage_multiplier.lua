@@ -348,7 +348,14 @@ return function(mod, data)
   -- mirror=true, protect=true}, nothing crash-shaped) -- Showdown itself
   -- special-cases these two moves by id rather than a flag, so this does
   -- the same: a fixed, tiny, real list, not a stand-in for missing data.
-  local CRASH_DAMAGE_MOVES = { JUMPKICK = true, HIGHJUMPKICK = true }
+  -- Supercell Slam (Phase 18, missing-effects plan) joined this list the
+  -- same way: Showdown marks it `hasCrashDamage: true` (moves.ts:18446),
+  -- which is exactly the flag the Reckless damage boost is defined over.
+  -- Its own crash-on-miss self-damage is still a documented gap (no
+  -- "the move missed" event reaches a mod -- see combat/
+  -- modern_guard_contact.lua's honest-partials note), but the boost half
+  -- is real and now applies.
+  local CRASH_DAMAGE_MOVES = { JUMPKICK = true, HIGHJUMPKICK = true, SUPERCELSLAM = true }
 
   registerDamageModifier("reckless", 90, function(ctx)
     if abilityIdOf(ctx.user) ~= "RECKLESS" then return 1.0 end
@@ -549,19 +556,20 @@ return function(mod, data)
   end)
 
   ------------------------------------------------------------------
-  -- Sheer Force: damage half only. 1.3x whenever the move used has a
-  -- real chance-based secondary effect, read live off national_dex's own
-  -- moveById (ailmentChance/statChance/flinchChance > 0 -- confirmed
-  -- these are exactly what the ability's own real effect text describes
-  -- as "an effect chance," not guessed). The OTHER half -- Sheer Force
-  -- also REMOVES that secondary effect entirely -- is NOT built here:
-  -- suppressing it means reaching into every secondary-effect
-  -- application site in this mod (the flinch/confuse listener,
-  -- StatusRegistry.inflict callers, every stat-change move handler) to
-  -- check for this ability first, a genuinely separate, more invasive
-  -- task than reading one more live number. Flagged, not silently
-  -- completed: today, Sheer Force gets the power boost AND the target
-  -- still suffers the secondary effect, which is NOT the real ability.
+  -- Sheer Force: damage half only HERE. 1.3x whenever the move used
+  -- has a real chance-based secondary effect, read live off
+  -- national_dex's own moveById (ailmentChance/statChance/flinchChance
+  -- > 0 -- confirmed these are exactly what the ability's own real
+  -- effect text describes as "an effect chance," not guessed). The
+  -- OTHER half -- Sheer Force also REMOVES that secondary effect --
+  -- lives in main.lua's own generic secondary listener
+  -- (installMovepoolEffects): `secondarySuppressed` nils the
+  -- flinch/confuse/ailment/stat-chance pool whenever the attacker is a
+  -- Sheer Force holder (or the defender is Shield Dust), which IS the
+  -- exact definition of "secondary effect" for every move that reaches
+  -- that listener. So both halves are built; this file owns only the
+  -- power half, and the two are deliberately split by which primitive
+  -- they edit (the damage chain vs. the secondary-application site).
   ------------------------------------------------------------------
   registerDamageModifier("sheer_force_damage_half", 90, function(ctx)
     if abilityIdOf(ctx.user) ~= "SHEERFORCE" then return 1.0 end
@@ -680,5 +688,5 @@ return function(mod, data)
     return 1.0
   end)
 
-  mod.log:info("g9-battle-engine-beta: damage_multiplier ability engine installed (Phase 2 + Phase 14: FLUFFY, ANALYTIC, FLASHFIRE boost)")
+  mod.log:info("g9-battle-engine: damage_multiplier ability engine installed (Phase 2 + Phase 14: FLUFFY, ANALYTIC, FLASHFIRE boost)")
 end

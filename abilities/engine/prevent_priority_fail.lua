@@ -19,18 +19,21 @@ return function(mod, data)
   local abilityIdOf = mod.exports.abilityIdOf
   assert(abilityIdOf, "prevent_priority_fail: ability_dispatch.lua must load first")
 
-  local Battle = require("src.battle.gen2.Battle")
-  local nativeUseMove = Battle.useMove
-  function Battle:useMove(attacker, defender, moveId)
-    if defender and defender ~= attacker and data[abilityIdOf(defender)] then
-      local info = moveById(moveId)
-      if info and info.target == "selected-pokemon" and self:movePriority(moveId, attacker) > 0 then
-        self:emit({ kind = "message", text = "But, it failed!" })
-        return
+  local gen2BattleOk, Battle = pcall(require, "src.battle.gen2.Battle")
+  Battle = gen2BattleOk and Battle or nil
+  if Battle then
+    local nativeUseMove = Battle.useMove
+    function Battle:useMove(attacker, defender, moveId)
+      if defender and defender ~= attacker and data[abilityIdOf(defender)] then
+        local info = moveById(moveId)
+        if info and info.target == "selected-pokemon" and self:movePriority(moveId, attacker) > 0 then
+          self:emit({ kind = "message", text = "But, it failed!" })
+          return
+        end
       end
+      return nativeUseMove(self, attacker, defender, moveId)
     end
-    return nativeUseMove(self, attacker, defender, moveId)
   end
 
-  mod.log:info("g9-battle-engine-beta: prevent_priority_fail installed (DAZZLING, QUEENLYMAJESTY, ARMORTAIL)")
+  mod.log:info("g9-battle-engine: prevent_priority_fail installed (DAZZLING, QUEENLYMAJESTY, ARMORTAIL)")
 end

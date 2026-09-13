@@ -19,7 +19,16 @@
 --     the mon wakes up -- real current rule lets a mon act immediately
 --     on the turn it wakes (Showdown's own bare `return;` -- no value --
 --     on the woken branch, vs an explicit `return false` for "still
---     asleep").
+--     asleep"). Because the wake now happens ON the turn the counter
+--     reaches zero (and that turn is PLAYED, not lost), the stored roll
+--     must be one higher than the number of turns actually lost: the roll
+--     is 2-4 (matching Showdown's `random(2, 5)`, which is 2/3/4), giving
+--     1/2/3 lost turns. ROUND 33 FIX: the roll was 1-3, so a freshly
+--     inflicted sleep could wake with ZERO lost turns -- impossible in the
+--     real games. Applies to both the Gen 1 record and the Gen 2 one.
+--     Rest deliberately sets its counter directly (3 -> 2 lost turns,
+--     matching Showdown's own `target.statusState.time = 3`), not through
+--     `onInflict` -- see THIS file's own Rest note further down.
 --   FREEZE: Gen 1's ported native has NO thaw roll AT ALL (`beforeMove`
 --     unconditionally returns "still frozen," confirmed by direct read)
 --     -- a Gen 1 battle's frozen mon never thaws on its own under the
@@ -78,7 +87,10 @@ return function(mod)
   end
 
   Status.RECORDS.SLP.onInflict = function(battle, target, opts, display)
-    target.sleepTurns = rangeRoll(false, battle, 1, 3)
+    -- 2-4, not 1-3: beforeMove wakes the mon on the turn this reaches
+    -- zero AND lets it act that turn, so the pre-decrement roll is the
+    -- lost-turn count plus one (Showdown's `random(2, 5)`). See header.
+    target.sleepTurns = rangeRoll(false, battle, 2, 4)
     local romText = require("src.core.RomText")
     return { romText(battle.data, "_FellAsleepText", "%s\nfell asleep!", display) }
   end
@@ -106,41 +118,106 @@ return function(mod)
   ------------------------------------------------------------------
   -- Gen 2
   ------------------------------------------------------------------
-  local Battle = require("src.battle.gen2.Battle")
+  local gen2Ok_Battle, Battle = pcall(require, "src.battle.gen2.Battle")
+  Battle = gen2Ok_Battle and Battle or nil
 
-  Battle.STATUSES.paralyze.beforeMove = function(battle, mon, name)
-    if percentRoll(true, battle, 25) then
-      battle:emit({ kind = "message", text = name .. "'s fully paralyzed!" })
+  if Battle then
+    Battle.STATUSES.paralyze.beforeMove = function(battle, mon, name)
+      if percentRoll(true, battle, 25) then
+        battle:emit({ kind = "message", text = name .. "'s fully paralyzed!" })
+        return false
+      end
+      return true
+    end
+
+    Battle.STATUSES.sleep.onInflict = function(battle, mon)
+      -- 2-4, not 1-3 -- the same off-by-one the Gen 1 record above had:
+      -- beforeMove wakes on the turn the counter hits zero and the mon
+      -- acts, so the stored roll is `lost turns + 1`. See this file's
+      -- header for the full reasoning and the Showdown citation.
+      mon.statusTurns = rangeRoll(true, battle, 2, 4)
+    end
+    Battle.STATUSES.sleep.beforeMove = function(battle, mon, name)
+      local dec = (abilityIdOf and abilityIdOf(mon) == "EARLYBIRD") and 2 or 1
+      mon.statusTurns = (mon.statusTurns or 1) - dec
+      if mon.statusTurns <= 0 then
+        mon.status = nil
+        mon.statusTurns = nil
+        battle:emit({ kind = "message", text = name .. " woke up!" })
+        return true
+      end
+      battle:emit({ kind = "message", text = name .. " is fast asleep!" })
       return false
     end
-    return true
-  end
 
-  Battle.STATUSES.sleep.onInflict = function(battle, mon)
-    mon.statusTurns = rangeRoll(true, battle, 1, 3)
-  end
-  Battle.STATUSES.sleep.beforeMove = function(battle, mon, name)
-    local dec = (abilityIdOf and abilityIdOf(mon) == "EARLYBIRD") and 2 or 1
-    mon.statusTurns = (mon.statusTurns or 1) - dec
-    if mon.statusTurns <= 0 then
-      mon.status = nil
-      mon.statusTurns = nil
-      battle:emit({ kind = "message", text = name .. " woke up!" })
-      return true
+    Battle.STATUSES.freeze.beforeMove = function(battle, mon, name)
+      if percentRoll(true, battle, 20) then
+        mon.status = nil
+        battle:emit({ kind = "message", text = name .. " thawed out!" })
+        return true
+      end
+      battle:emit({ kind = "message", text = name .. " is frozen solid!" })
+      return false
     end
-    battle:emit({ kind = "message", text = name .. " is fast asleep!" })
-    return false
-  end
 
-  Battle.STATUSES.freeze.beforeMove = function(battle, mon, name)
-    if percentRoll(true, battle, 20) then
-      mon.status = nil
-      battle:emit({ kind = "message", text = name .. " thawed out!" })
-      return true
+    ------------------------------------------------------------------
+    -- Toxic's ramp (ROUND 33). Real current Showdown (data/conditions.ts,
+    -- the `tox` entry, fetched and read this pass, not recalled):
+    --     onResidual(pokemon) {
+    --       if (this.effectState.stage < 15) this.effectState.stage++;
+    --       this.damage(clampIntRange(pokemon.baseMaxhp / 16, 1) * this.effectState.stage);
+    --     }
+    -- so the nth tick is `max(1, floor(maxHp / 16)) * stage`, and the ramp
+    -- HARD CAPS at stage 15 (a Gen 4+ rule; the pre-existing native Gen 2
+    -- residual here was `max(1, floor(maxHp * counter / 16))` with NO cap,
+    -- which also drifts from Showdown at high stages because it floors the
+    -- product rather than the per-turn slice). Re-pointed here, the same
+    -- in-place record swap this file already does for paralysis/sleep/
+    -- freeze. `onInflict`'s `mon.toxicCounter = 1` stays native -- it is the
+    -- stage the residual reads, and the reset-on-switch half of the real
+    -- mechanic lives in combat/status_condition_cleanup.lua.
+    local Strings = require("src.core.Strings")
+    Battle.STATUSES.toxic.residual = function(_, mon, maxHp)
+      local stage = mon.toxicCounter or 1
+      if stage < 15 then mon.toxicCounter = stage + 1 end
+      return math.max(1, math.floor(maxHp / 16)) * stage,
+        Strings(" is hurt by poison!")
     end
-    battle:emit({ kind = "message", text = name .. " is frozen solid!" })
-    return false
   end
 
-  mod.log:info("g9-battle-engine-beta: modern_status_turn_loss installed (real Gen 9 paralysis 25%%/sleep 1-3 turns/freeze 20%% thaw, both engines, Early Bird wired)")
+  ------------------------------------------------------------------
+  -- Rest's own sleep length, Gen 1 (ROUND 33). Native Gen 1 MoveEffects
+  -- .HEAL_EFFECT writes `user.sleepTurns = 2` directly (bypassing
+  -- SLP.onInflict, so the roll above never runs for Rest). That value
+  -- was tuned for the OLD sleep semantics, where the wake turn was still
+  -- lost; under this file's own real-current rule -- the mon wakes AND
+  -- acts on the turn the counter reaches zero -- a stored 2 wakes after
+  -- only ONE lost turn, where the real games (and this mod's own Gen 2
+  -- Rest, whose native handler writes `statusTurns = 3`) give TWO.
+  -- Showdown is explicit: data/moves.ts's own `rest` sets
+  -- `target.statusState.time = 3` (and `startTime = 3`). So the Gen 1
+  -- record's `run` is wrapped in place to bump Rest's counter to 3 AFTER
+  -- the native body writes 2 -- mutating the existing record table
+  -- rather than replacing it, because MoveEffects.registerInto has
+  -- already handed this exact table to the live move-effect registry by
+  -- reference (a fresh table assignment would never be seen).
+  do
+    local ok, MoveEffects = pcall(require, "src.battle.MoveEffects")
+    local record = ok and MoveEffects and MoveEffects.RECORDS
+      and MoveEffects.RECORDS.HEAL_EFFECT
+    if record and type(record.run) == "function" then
+      local nativeRun = record.run
+      record.run = function(ctx)
+        local msgs = nativeRun(ctx)
+        if ctx and ctx.move and ctx.move.id == "REST" and ctx.user then
+          ctx.user.sleepTurns = 3
+        end
+        return msgs
+      end
+    else
+      mod.log:warn("g9-battle-engine: modern_status_turn_loss could not wrap Gen 1 Rest's sleep length (MoveEffects.RECORDS.HEAL_EFFECT not found)")
+    end
+  end
+
+  mod.log:info("g9-battle-engine: modern_status_turn_loss installed (real Gen 9 paralysis 25%%/sleep 1-3 turns lost/freeze 20%% thaw, both engines, Early Bird wired, Rest = 2 lost turns both generations, toxic ramp capped at 15/16)")
 end

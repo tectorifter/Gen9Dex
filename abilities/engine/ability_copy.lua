@@ -150,6 +150,6 @@ return function(mod, data)
     end
   end)
 
-  mod.log:info("g9-battle-engine-beta: ability_copy installed (TRACE, MUMMY, LINGERINGAROMA, "
+  mod.log:info("g9-battle-engine: ability_copy installed (TRACE, MUMMY, LINGERINGAROMA, "
     .. "WANDERINGSPIRIT, RECEIVER, POWEROFALCHEMY)")
 end

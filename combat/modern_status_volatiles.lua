@@ -93,11 +93,17 @@ return function(mod)
     "modern_status_volatiles: modern_combat.lua must load first")
 
   local function hpOf(mon) return (mon.mon or mon) end
-  local function healFractionOf(mon, denom)
+  local function healFractionOf(battle, mon, denom)
     local m = hpOf(mon)
     local maxHp = m.stats and m.stats.hp
     if not (maxHp and maxHp > 0 and (m.hp or 0) < maxHp) then return end
-    m.hp = math.min(maxHp, (m.hp or 0) + math.max(1, math.floor(maxHp / denom)))
+    local amount = math.max(1, math.floor(maxHp / denom))
+    local tryHeal = mod.exports.g9TryHeal
+    if tryHeal then
+      tryHeal(battle, mon, amount)
+    else
+      m.hp = math.min(maxHp, (m.hp or 0) + amount)
+    end
   end
   local function damageFractionOf(mon, denom)
     local m = hpOf(mon)
@@ -157,7 +163,15 @@ return function(mod)
                 if seededAbility == "LIQUIDOOZE" then
                   src.hp = math.max(0, (src.hp or 0) - amount)
                 else
-                  src.hp = math.min(srcMax, (src.hp or 0) + amount)
+                  -- Heal Block / boss "healblock": the seeder's own recovery
+                  -- is gated exactly like every other heal (a blocked seeder
+                  -- simply gets nothing; the drain still happened).
+                  local tryHeal = mod.exports.g9TryHeal
+                  if tryHeal then
+                    tryHeal(battle, mon.leechSeedSource, amount)
+                  else
+                    src.hp = math.min(srcMax, (src.hp or 0) + amount)
+                  end
                 end
               end
             end
@@ -167,7 +181,7 @@ return function(mod)
           damageFractionOf(mon, 4)
         end
         if mon.ingrained then
-          healFractionOf(mon, 16)
+          healFractionOf(battle, mon, 16)
         end
       end
     end
@@ -353,27 +367,39 @@ return function(mod)
   -- move; Throat Chop blocks any `sound`-flagged move; Embargo blocks
   -- item use (checked at combat/modern_items.lua's own gate, not here
   -- -- that file owns every real item interaction already).
-  local Battle = require("src.battle.gen2.Battle")
-  local nativeUseMove = Battle.useMove
-  function Battle:useMove(attacker, defender, moveId)
-    if attacker then
-      local flags = moveFlags(moveId)
-      if flags then
-        if attacker.healBlockTurns and flags.heal then
-          self:emit({ kind = "message", text = self:monName(attacker) .. " can't use healing moves!" })
-          return
+  --
+  -- Gen 2 ONLY. src.battle.gen2.Battle is a hard cross-generation denial
+  -- on a Gen 1 game (src/mods/Loader.crossGenerationDenial), and this
+  -- require used to be UNGUARDED here -- which failed the WHOLE file on
+  -- Gen 1, taking Heal Block, Leech Seed, Ingrain, Yawn, Disable, Embargo,
+  -- Throat Chop, Perish Song and this file's residual ticks down with it.
+  -- Gen 1's own Heal Block move-selection block lives in the shared
+  -- combat/move_usability.lua gate installed by combat/heal_block.lua
+  -- (both generations), so nothing is lost by scoping this native wrap to
+  -- Gen 2.
+  local gen2ok, Battle = pcall(require, "src.battle.gen2.Battle")
+  if gen2ok and type(Battle) == "table" and type(Battle.useMove) == "function" then
+    local nativeUseMove = Battle.useMove
+    function Battle:useMove(attacker, defender, moveId)
+      if attacker then
+        local flags = moveFlags(moveId)
+        if flags then
+          if attacker.healBlockTurns and flags.heal then
+            self:emit({ kind = "message", text = self:monName(attacker) .. " can't use healing moves!" })
+            return
+          end
+          if attacker.throatChopTurns and flags.sound then
+            self:emit({ kind = "message", text = self:monName(attacker) .. " can't use sound moves!" })
+            return
+          end
         end
-        if attacker.throatChopTurns and flags.sound then
-          self:emit({ kind = "message", text = self:monName(attacker) .. " can't use sound moves!" })
+        if attacker.disabledMoveId and attacker.disabledMoveId == moveId then
+          self:emit({ kind = "message", text = self:monName(attacker) .. "'s move is disabled!" })
           return
         end
       end
-      if attacker.disabledMoveId and attacker.disabledMoveId == moveId then
-        self:emit({ kind = "message", text = self:monName(attacker) .. "'s move is disabled!" })
-        return
-      end
+      return nativeUseMove(self, attacker, defender, moveId)
     end
-    return nativeUseMove(self, attacker, defender, moveId)
   end
 
   ------------------------------------------------------------------
@@ -454,7 +480,7 @@ return function(mod)
     if not (ev and ev.move and ev.move.effect == "GALAR_SMACKDOWN_EFFECT") then return end
     local ok, err = pcall(markImmunityNegated("groundedByMove"), ev.battle, ev.user, ev.target)
     if not ok then
-      mod.log:warn("g9-battle-engine-beta: GALAR_SMACKDOWN_EFFECT listener failed: %s", tostring(err))
+      mod.log:warn("g9-battle-engine: GALAR_SMACKDOWN_EFFECT listener failed: %s", tostring(err))
     end
   end)
 
@@ -676,5 +702,5 @@ return function(mod)
     if mon then mon.stockpileLayers = nil end
   end)
 
-  mod.log:info("g9-battle-engine-beta: modern_status_volatiles installed (Leech Seed, Nightmare, Ingrain, Yawn, Disable, Embargo, Heal Block, Psychic Noise, Throat Chop, Perish Song, Foresight, Miracle Eye, Smack Down, Telekinesis, Uproar, Dire Claw, Tri Attack)")
+  mod.log:info("g9-battle-engine: modern_status_volatiles installed (Leech Seed, Nightmare, Ingrain, Yawn, Disable, Embargo, Heal Block, Psychic Noise, Throat Chop, Perish Song, Foresight, Miracle Eye, Smack Down, Telekinesis, Uproar, Dire Claw, Tri Attack)")
 end

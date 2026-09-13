@@ -164,11 +164,17 @@ return function(mod)
     return displayNameFor and displayNameFor(battle, who, gen2) or "???"
   end
 
-  local function healFraction(who, denom)
+  local function healFraction(battle, who, denom)
     local m = who.mon or who
     local maxHp = m.maxHp or (m.stats and m.stats.hp) or 1
     if (m.hp or 0) < maxHp then
-      m.hp = math.min(maxHp, (m.hp or 0) + math.max(1, math.floor(maxHp / denom)))
+      local amount = math.max(1, math.floor(maxHp / denom))
+      local tryHeal = mod.exports.g9TryHeal
+      if tryHeal then
+        tryHeal(battle, who, amount)
+      else
+        m.hp = math.min(maxHp, (m.hp or 0) + amount)
+      end
     end
   end
 
@@ -489,7 +495,7 @@ return function(mod)
   end
 
   GMAX.FINALE = function(n, ev)
-    for _, ally in ipairs(alliesAndSelf(n.battle, n.user)) do healFraction(ally, 6) end
+    for _, ally in ipairs(alliesAndSelf(n.battle, n.user)) do healFraction(n.battle, ally, 6) end
   end
 
   GMAX.FOAMBURST = function(n, ev)

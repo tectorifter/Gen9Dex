@@ -287,7 +287,7 @@ caster, moveId, chosenTarget)` at the point it would otherwise call
 one battler in the returned list, only possible on the two spread
 archetypes), it loops `useMove` once per resolved target, passing
 `opts.targetCount = #targets` each time so the spread-reduction
-modifier in `modern_combat.lua` applies correctly.
+step in `modern_combat.lua` applies correctly.
 
 ## The actual ask, if you're building this
 
@@ -307,7 +307,7 @@ from that same real roster) — real singles/doubles/triples/boss-fight
 combat, not a stub. **Not done anywhere yet**: a real, N-way
 `Battle:sideOf` override (the gap named above) — nothing currently
 corrects a non-primary battler's event `side` tag, so anything in
-`g9-battle-engine-beta` that reads `battle.player`/`battle.enemy`
+`g9-battle-engine` that reads `battle.player`/`battle.enemy`
 directly instead of the caster/target it was actually handed (a real risk
 for code added without this multi-battler context in mind — audit before
 assuming any given ability/status file generalizes correctly to battler

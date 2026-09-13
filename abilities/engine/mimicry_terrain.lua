@@ -57,5 +57,5 @@ return function(mod, data)
 
   mod.events:on("g9.terrain_changed", function(ev) reapplyBothSides(ev and ev.battle) end)
 
-  mod.log:info("g9-battle-engine-beta: mimicry_terrain ability engine installed (MIMICRY)")
+  mod.log:info("g9-battle-engine: mimicry_terrain ability engine installed (MIMICRY)")
 end

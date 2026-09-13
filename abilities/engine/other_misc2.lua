@@ -41,5 +41,5 @@ return function(mod, data)
     return mult
   end)
 
-  mod.log:info("g9-battle-engine-beta: other_misc2 installed (PERISHBODY, PUNKROCK)")
+  mod.log:info("g9-battle-engine: other_misc2 installed (PERISHBODY, PUNKROCK)")
 end

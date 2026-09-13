@@ -52,7 +52,8 @@ return function(mod)
     "modern_held_items_phase2: combat/modern_items.lua, combat/modern_combat.lua and "
       .. "combat/turn_order.lua must all load first")
 
-  local Battle2 = require("src.battle.gen2.Battle")
+  local gen2Ok_Battle2, Battle2 = pcall(require, "src.battle.gen2.Battle")
+  Battle2 = gen2Ok_Battle2 and Battle2 or nil
 
   local function hpOf(mon) return (mon.mon or mon) end
   local function damageFraction(mon, fraction)
@@ -61,6 +62,12 @@ return function(mod)
     if not (maxHp and maxHp > 0) then return end
     m.hp = math.max(0, (m.hp or 0) - math.max(1, math.floor(maxHp * fraction)))
   end
+  -- Raw mon behind a Gen-1 battler wrapper, or the mon itself on Gen 2
+  -- (round 99). species/transformed/maxHp all live on the raw mon in both
+  -- generations -- a Gen-1 wrapper only exposes .mon/.def/.curStats/.stages
+  -- (src/battle/BattleState.lua makeBattler), so every species gate below
+  -- reads through this rather than off `user.species`.
+  local function rawMon(who) return who and (who.mon or who) or nil end
 
   ------------------------------------------------------------------
   -- New item registrations. tossable=true matches the real evolution-
@@ -102,10 +109,10 @@ return function(mod)
         })
       end)
       if ok then registered = registered + 1
-      else mod.log:warn("g9-battle-engine-beta: modern_held_items_phase2: "
+      else mod.log:warn("g9-battle-engine: modern_held_items_phase2: "
         .. "item registration failed for %s (%s)", def.id, tostring(err)) end
     end
-    mod.log:info("g9-battle-engine-beta: modern_held_items_phase2: %d/%d new items registered",
+    mod.log:info("g9-battle-engine: modern_held_items_phase2: %d/%d new items registered",
       registered, #NEW_ITEMS)
   end
 
@@ -126,6 +133,9 @@ return function(mod)
     POISON_BARB = "POISON", SOFT_SAND = "GROUND", SHARP_BEAK = "FLYING",
     TWISTEDSPOON = "PSYCHIC", BLACKGLASSES = "DARK", HARD_STONE = "ROCK",
     METAL_COAT = "STEEL", DRAGON_FANG = "DRAGON", SILVERPOWDER = "BUG",
+    -- Phase 27: the family's conspicuous hole -- Ghost. Real value is the
+    -- same 1.2x as every other entry (items.ts:5898 `chainModify([4915,4096])`).
+    SPELL_TAG = "GHOST",
   }
   -- Species-locked: item id -> { species = real Gen2 species id, types = {a,b} }
   local SPECIES_TYPE_BOOST_ITEMS = {
@@ -138,19 +148,38 @@ return function(mod)
     -- own standing rule is always the highest generation's real version.
     SOUL_DEW = { species = "LATIOS", altSpecies = "LATIAS", types = { PSYCHIC = true, DRAGON = true } },
   }
-  registerDamageModifier("held_item_type_boost", 90, function(ctx)
-    if not ctx.gen2 then return 1.0 end
-    local item = itemOf(ctx.user, true)
+  local function heldItemTypeBoostMultiplier(ctx)
+    -- Round 99: runs for BOTH generations now (ctx.gen2 comes off the
+    -- damage ctx computeModernDamage publishes). Gen 1 reads the item via
+    -- the saved g9HeldItem slot and its species off the raw mon behind the
+    -- battler wrapper.
+    local gen2 = ctx.gen2 and true or false
+    local item = itemOf(ctx.user, gen2)
     if not item then return 1.0 end
     local plainType = TYPE_BOOST_ITEMS[item]
     if plainType and ctx.move.type == plainType then return 4915 / 4096 end
     local locked = SPECIES_TYPE_BOOST_ITEMS[item]
-    if locked and locked.types[ctx.move.type]
-        and (ctx.user.species == locked.species or (locked.altSpecies and ctx.user.species == locked.altSpecies)) then
-      return 4915 / 4096
+    if locked and locked.types[ctx.move.type] then
+      local species = rawMon(ctx.user) and rawMon(ctx.user).species
+      if species and (species == locked.species
+          or (locked.altSpecies and species == locked.altSpecies)) then
+        return 4915 / 4096
+      end
+    end
+    -- Phase 27: Pink Bow / Polkadot Bow -- the two True-Past Normal items.
+    -- items.ts:8070/8083 are `onBasePower` returning `basePower * 1.1` for
+    -- a Normal move. flags.lua omits them (True Past), so the value is
+    -- hand-written; 1.1 on this file's 4096-denominator damage chain is
+    -- 4506/4096, the same approximation this whole 1.2 family already uses.
+    if (item == "PINK_BOW" or item == "POLKADOT_BOW") and ctx.move.type == "NORMAL" then
+      return 4506 / 4096
     end
     return 1.0
-  end)
+  end
+  registerDamageModifier("held_item_type_boost", 90, heldItemTypeBoostMultiplier)
+  -- Exported (pure, no battle write) so the harness can assert the type-boost
+  -- family -- including the phase-27 Spell Tag / bow additions -- directly.
+  mod.exports.heldItemTypeBoostMultiplier = heldItemTypeBoostMultiplier
 
   ------------------------------------------------------------------
   -- LIFE_ORB -- real 1.3x damage on every hit (`chainModify([5324,4096])`)
@@ -166,18 +195,19 @@ return function(mod)
   -- for one item.
   ------------------------------------------------------------------
   registerDamageModifier("life_orb", 85, function(ctx)
-    if not ctx.gen2 then return 1.0 end
-    if itemOf(ctx.user, true) ~= "LIFE_ORB" then return 1.0 end
+    if itemOf(ctx.user, ctx.gen2) ~= "LIFE_ORB" then return 1.0 end
     return 5324 / 4096
   end)
   mod.events:on("battle.damage_dealt", function(ev)
     local user = ev and ev.user
     local move = ev and ev.move
-    if not (user and move and ev.battle and isGen2Battle(ev.battle) and (ev.damage or 0) > 0) then return end
-    if itemOf(user, true) ~= "LIFE_ORB" then return end
+    if not (user and move and ev.battle and (ev.damage or 0) > 0) then return end
+    local gen2 = isGen2Battle(ev.battle)
+    if itemOf(user, gen2) ~= "LIFE_ORB" then return end
     local nationalDex = mod.find and mod.find("national_dex")
     local moveById = nationalDex and nationalDex.exports and nationalDex.exports.moveById
-    local ok, info = moveById and pcall(moveById, move.id)
+    if not moveById then return end
+    local ok, info = pcall(moveById, move.id)
     if ok and info and info.damageClass == "status" then return end
     damageFraction(user, 1 / 10)
   end)
@@ -192,8 +222,8 @@ return function(mod)
   -- modern_combat.lua) -- registered here on the same real chain.
   ------------------------------------------------------------------
   registerPostEffectivenessModifier("expertbelt", 0, function(ctx)
-    if not (ctx.gen2 and ctx.user) then return 1.0 end
-    if itemOf(ctx.user, true) ~= "EXPERT_BELT" then return 1.0 end
+    if not ctx.user then return 1.0 end
+    if itemOf(ctx.user, ctx.gen2) ~= "EXPERT_BELT" then return 1.0 end
     if ctx.mult and ctx.mult > 10 then return 4915 / 4096 end
     return 1.0
   end)
@@ -208,11 +238,13 @@ return function(mod)
     local target = ev and ev.target
     local user = ev and ev.user
     local move = ev and ev.move
-    if not (target and user and move and ev.battle and isGen2Battle(ev.battle) and (ev.damage or 0) > 0) then return end
-    if itemOf(target, true) ~= "ROCKY_HELMET" then return end
+    if not (target and user and move and ev.battle and (ev.damage or 0) > 0) then return end
+    local gen2 = isGen2Battle(ev.battle)
+    if itemOf(target, gen2) ~= "ROCKY_HELMET" then return end
     local nationalDex = mod.find and mod.find("national_dex")
     local moveById = nationalDex and nationalDex.exports and nationalDex.exports.moveById
-    local ok, info = moveById and pcall(moveById, move.id)
+    if not moveById then return end
+    local ok, info = pcall(moveById, move.id)
     if not (ok and info and info.damageClass == "physical") then return end
     local makesContact = mod.exports.makesContact
     if makesContact and makesContact(move.id, user) then damageFraction(user, 1 / 6) end
@@ -228,18 +260,25 @@ return function(mod)
   ------------------------------------------------------------------
   mod.events:on("battle.turn_ended", function(ev)
     local battle = ev and ev.battle
-    if not (battle and isGen2Battle(battle)) then return end
+    if not battle then return end
+    local gen2 = isGen2Battle(battle)
     local curTypesOf = mod.exports.curTypesOf
-    for _, mon in ipairs({ battle.player, battle.enemy }) do
-      if mon and (mon.hp or 0) > 0 and itemOf(mon, true) == "BLACK_SLUDGE" then
+    for _, who in ipairs({ battle.player, battle.enemy }) do
+      local mon = rawMon(who)
+      if mon and (mon.hp or 0) > 0 and itemOf(who, gen2) == "BLACK_SLUDGE" then
         local maxHp = mon.stats and mon.stats.hp
         if maxHp and maxHp > 0 then
           local isPoison = false
-          for _, t in ipairs(curTypesOf and curTypesOf(mon, true) or {}) do
+          for _, t in ipairs(curTypesOf and curTypesOf(who, gen2) or {}) do
             if t == "POISON" then isPoison = true end
           end
           if isPoison then
-            mon.hp = math.min(maxHp, mon.hp + math.max(1, math.floor(maxHp / 16)))
+            local tryHeal = mod.exports.g9TryHeal
+            if tryHeal then
+              tryHeal(battle, who, math.max(1, math.floor(maxHp / 16)))
+            else
+              mon.hp = math.min(maxHp, mon.hp + math.max(1, math.floor(maxHp / 16)))
+            end
           else
             mon.hp = math.max(0, mon.hp - math.max(1, math.floor(maxHp / 8)))
           end
@@ -259,23 +298,25 @@ return function(mod)
   -- legacy_move_takeover.lua's own Battle2:dealDamage patch already
   -- established -- not an edit to gen1recomp-dev's own source file).
   ------------------------------------------------------------------
-  local nativeLightScreen = Battle2.MOVE_EFFECTS.EFFECT_LIGHT_SCREEN
-  Battle2.MOVE_EFFECTS.EFFECT_LIGHT_SCREEN = function(self, attacker)
-    local result = nativeLightScreen(self, attacker)
-    local side = self.screens[self:sideOf(attacker)]
-    if (side.lightScreen or 0) > 0 and itemOf(attacker, true) == "LIGHT_CLAY" then
-      side.lightScreen = 8
+  if Battle2 then
+    local nativeLightScreen = Battle2.MOVE_EFFECTS.EFFECT_LIGHT_SCREEN
+    Battle2.MOVE_EFFECTS.EFFECT_LIGHT_SCREEN = function(self, attacker)
+      local result = nativeLightScreen(self, attacker)
+      local side = self.screens[self:sideOf(attacker)]
+      if (side.lightScreen or 0) > 0 and itemOf(attacker, true) == "LIGHT_CLAY" then
+        side.lightScreen = 8
+      end
+      return result
     end
-    return result
-  end
-  local nativeReflect = Battle2.MOVE_EFFECTS.EFFECT_REFLECT
-  Battle2.MOVE_EFFECTS.EFFECT_REFLECT = function(self, attacker)
-    local result = nativeReflect(self, attacker)
-    local side = self.screens[self:sideOf(attacker)]
-    if (side.reflect or 0) > 0 and itemOf(attacker, true) == "LIGHT_CLAY" then
-      side.reflect = 8
+    local nativeReflect = Battle2.MOVE_EFFECTS.EFFECT_REFLECT
+    Battle2.MOVE_EFFECTS.EFFECT_REFLECT = function(self, attacker)
+      local result = nativeReflect(self, attacker)
+      local side = self.screens[self:sideOf(attacker)]
+      if (side.reflect or 0) > 0 and itemOf(attacker, true) == "LIGHT_CLAY" then
+        side.reflect = 8
+      end
+      return result
     end
-    return result
   end
 
   ------------------------------------------------------------------
@@ -301,32 +342,55 @@ return function(mod)
     local evo = evolutionsOf and speciesId and evolutionsOf(speciesId)
     return evo and evo.evolvesInto and #evo.evolvesInto > 0
   end
-  mod.exports.applyHeldItemStatMultiplier = function(ctx, user, target, atkStat, defStat, atk, dfn)
-    if not ctx.gen2 then return atk, dfn end
-    local userItem = itemOf(user, true)
-    local targetItem = itemOf(target, true)
-    if userItem == "CHOICE_BAND" and atkStat == "attack" then
+  -- atkEventStat (optional): the move's CATEGORY stat ("attack"/"spa"), as
+  -- opposed to atkStat, which is the stat actually READ from the mon. They
+  -- differ only for a damage-source override (Phase 4, modern_damage_source
+  -- .lua -- Body Press reads Defense while still being a Physical move).
+  -- Real Showdown's ModifyAtk/ModifySpA events run against the category
+  -- stat (battle-actions.ts:1713) and every item below is an onModifyAtk/
+  -- onModifySpA handler (items.ts:974-975 etc.), so an unconditional
+  -- Choice Band boosts Body Press too. Defaulting to atkStat keeps every
+  -- non-overridden move byte-identical.
+  mod.exports.applyHeldItemStatMultiplier = function(ctx, user, target, atkStat, defStat, atk, dfn, atkEventStat)
+    -- Round 99: works for BOTH generations. `ctx.gen2` is published by
+    -- computeModernDamage now (it used to be absent on the outer ctx, which
+    -- silently early-returned here on EVERY generation and left Choice
+    -- Band/Specs/Scarf, Assault Vest, Eviolite, Light Ball, Thick Club,
+    -- Deep Sea Tooth/Scale and Metal Powder inert everywhere). The item
+    -- and species gates below go through the gen-aware itemOf + rawMon.
+    local gen2 = ctx.gen2 and true or false
+    -- Magic Room (combat/trick_room.lua) suppresses every held item's effect
+    -- for its duration; this is the mod's own stat-multiplier entry, not the
+    -- native heldEffect path the room already nils out, so it needs its own
+    -- gate.
+    if ctx.battle and ctx.battle.magicRoomActive then return atk, dfn end
+    local userStat = atkEventStat or atkStat
+    local userItem = itemOf(user, gen2)
+    local targetItem = itemOf(target, gen2)
+    local userMon = rawMon(user) or {}
+    local targetMon = rawMon(target) or {}
+    if userItem == "CHOICE_BAND" and userStat == "attack" then
       atk = math.floor(atk * 1.5)
-    elseif userItem == "CHOICE_SPECS" and atkStat == "spa" then
+    elseif userItem == "CHOICE_SPECS" and userStat == "spa" then
       atk = math.floor(atk * 1.5)
-    elseif userItem == "LIGHT_BALL" and user.species == "PIKACHU"
-        and (atkStat == "attack" or atkStat == "spa") then
+    elseif userItem == "LIGHT_BALL" and userMon.species == "PIKACHU"
+        and (userStat == "attack" or userStat == "spa") then
       atk = math.floor(atk * 2)
-    elseif userItem == "THICK_CLUB" and atkStat == "attack"
-        and (user.species == "CUBONE" or user.species == "MAROWAK") then
+    elseif userItem == "THICK_CLUB" and userStat == "attack"
+        and (userMon.species == "CUBONE" or userMon.species == "MAROWAK") then
       atk = math.floor(atk * 2)
-    elseif userItem == "DEEP_SEA_TOOTH" and atkStat == "spa" and user.species == "CLAMPERL" then
+    elseif userItem == "DEEP_SEA_TOOTH" and userStat == "spa" and userMon.species == "CLAMPERL" then
       atk = math.floor(atk * 2)
     end
     if targetItem == "ASSAULT_VEST" and defStat == "spd" then
       dfn = math.floor(dfn * 1.5)
     elseif targetItem == "EVIOLITE" and (defStat == "defense" or defStat == "spd")
-        and nfe(target.species) then
+        and nfe(targetMon.species) then
       dfn = math.floor(dfn * 1.5)
-    elseif targetItem == "DEEP_SEA_SCALE" and defStat == "spd" and target.species == "CLAMPERL" then
+    elseif targetItem == "DEEP_SEA_SCALE" and defStat == "spd" and targetMon.species == "CLAMPERL" then
       dfn = math.floor(dfn * 2)
-    elseif targetItem == "METAL_POWDER" and defStat == "defense" and target.species == "DITTO"
-        and not target.transformed then
+    elseif targetItem == "METAL_POWDER" and defStat == "defense" and targetMon.species == "DITTO"
+        and not targetMon.transformed then
       dfn = math.floor(dfn * 2)
     end
     return atk, dfn
@@ -343,19 +407,22 @@ return function(mod)
   -- through this file's own applyHeldItemStatMultiplier above instead,
   -- a completely separate real code path).
   ------------------------------------------------------------------
-  local nativeBattleStat = Battle2.battleStat
-  function Battle2:battleStat(mon, key)
-    local value = nativeBattleStat(self, mon, key)
-    if key ~= "speed" or not mon then return value end
-    local item = itemOf(mon, true)
-    if item == "CHOICE_SCARF" then
-      return math.floor(value * 1.5)
-    elseif item == "QUICK_POWDER" and mon.species == "DITTO" and not mon.transformed then
-      return math.floor(value * 2)
-    elseif item == "IRON_BALL" then
-      return math.floor(value * 0.5)
+  if Battle2 then
+    local nativeBattleStat = Battle2.battleStat
+    function Battle2:battleStat(mon, key)
+      local value = nativeBattleStat(self, mon, key)
+      if key ~= "speed" or not mon then return value end
+      if self.magicRoomActive then return value end -- Magic Room suppresses held items
+      local item = itemOf(mon, true)
+      if item == "CHOICE_SCARF" then
+        return math.floor(value * 1.5)
+      elseif item == "QUICK_POWDER" and mon.species == "DITTO" and not mon.transformed then
+        return math.floor(value * 2)
+      elseif item == "IRON_BALL" then
+        return math.floor(value * 0.5)
+      end
+      return value
     end
-    return value
   end
 
   ------------------------------------------------------------------
@@ -369,8 +436,8 @@ return function(mod)
   -- Trap, none of which check this same signal yet -- not built here,
   -- flagged rather than silently claimed complete.
   ------------------------------------------------------------------
-  mod.exports.ironBallGrounds = function(mon)
-    return itemOf(mon, true) == "IRON_BALL"
+  mod.exports.ironBallGrounds = function(mon, gen2)
+    return itemOf(mon, gen2) == "IRON_BALL"
   end
 
   ------------------------------------------------------------------
@@ -385,6 +452,7 @@ return function(mod)
   ------------------------------------------------------------------
   registerPriorityModifier("lagging_tail", function(battle, moveId, caster, def)
     if not caster then return 0 end
+    if battle and battle.magicRoomActive then return 0 end -- Magic Room suppresses held items
     local item = itemOf(caster, true)
     if item == "LAGGING_TAIL" or item == "FULL_INCENSE" then return -0.1 end
     return 0
@@ -406,17 +474,20 @@ return function(mod)
   -- field would corrupt its own separate duration/messaging semantics
   -- if the two ever overlapped on the same mon.
   ------------------------------------------------------------------
-  local nativeForcedMove = Battle2.forcedMove
-  function Battle2:forcedMove(mon)
-    local native = nativeForcedMove(self, mon)
-    if native then return native end
-    local locked = mon.ggdChoiceLockedMove
-    if not locked then return nil end
-    for _, move in ipairs(mon.moves or {}) do
-      if move.id == locked and (move.pp or 0) > 0 then return locked end
+  if Battle2 then
+    local nativeForcedMove = Battle2.forcedMove
+    function Battle2:forcedMove(mon)
+      local native = nativeForcedMove(self, mon)
+      if native then return native end
+      if self.magicRoomActive then return nil end -- Magic Room suppresses the Choice lock
+      local locked = mon.ggdChoiceLockedMove
+      if not locked then return nil end
+      for _, move in ipairs(mon.moves or {}) do
+        if move.id == locked and (move.pp or 0) > 0 then return locked end
+      end
+      mon.ggdChoiceLockedMove = nil
+      return nil
     end
-    mon.ggdChoiceLockedMove = nil
-    return nil
   end
 
   -- Direct monkeypatch of the real native `Battle:useMove(attacker,
@@ -430,16 +501,18 @@ return function(mod)
   -- (Metronome, Mirror Move, Sleep Talk) overwrite state meant for the
   -- TOP-LEVEL move the player actually selected" -- the same real guard
   -- native `lastMove` tracking uses for an identical problem.
-  local nativeUseMove = Battle2.useMove
-  function Battle2:useMove(attacker, defender, moveId)
-    local result = nativeUseMove(self, attacker, defender, moveId)
-    if attacker and moveId and (self.copyDepth or 0) == 0 then
-      local item = itemOf(attacker, true)
-      if item == "CHOICE_BAND" or item == "CHOICE_SPECS" or item == "CHOICE_SCARF" then
-        attacker.ggdChoiceLockedMove = moveId
+  if Battle2 then
+    local nativeUseMove = Battle2.useMove
+    function Battle2:useMove(attacker, defender, moveId)
+      local result = nativeUseMove(self, attacker, defender, moveId)
+      if attacker and moveId and (self.copyDepth or 0) == 0 and not self.magicRoomActive then
+        local item = itemOf(attacker, true)
+        if item == "CHOICE_BAND" or item == "CHOICE_SPECS" or item == "CHOICE_SCARF" then
+          attacker.ggdChoiceLockedMove = moveId
+        end
       end
+      return result
     end
-    return result
   end
 
   mod.events:on("battle.battler_switched", function(ev)
@@ -457,24 +530,40 @@ return function(mod)
   -- selectable," which forcedMove's own shape can't express -- needs
   -- its own, separate filter pass over the returned list.
   ------------------------------------------------------------------
-  local nativeUsableMoves = Battle2.usableMoves
-  function Battle2:usableMoves(mon)
-    local out = nativeUsableMoves(self, mon)
-    if itemOf(mon, true) ~= "ASSAULT_VEST" then return out end
-    local nationalDex = mod.find and mod.find("national_dex")
-    local moveById = nationalDex and nationalDex.exports and nationalDex.exports.moveById
-    if not moveById then return out end
-    local filtered = {}
-    for _, move in ipairs(out) do
-      local ok, info = pcall(moveById, move.id)
-      if move.id == "MEFIRST" or not (ok and info and info.damageClass == "status") then
-        filtered[#filtered + 1] = move
+  if Battle2 then
+    local nativeUsableMoves = Battle2.usableMoves
+    function Battle2:usableMoves(mon)
+      local out = nativeUsableMoves(self, mon)
+      if self.magicRoomActive then return out end -- Magic Room suppresses held items
+      -- The "does this item forbid this kind of move" test now lives in ONE
+      -- place -- combat/move_usability.lua's itemMoveBanned (round 100) -- so
+      -- this native menu filter and the engine->scene moveUsability query can
+      -- never disagree about what an Assault Vest (or any future move-type-
+      -- banning item) forbids. Resolved lazily; the pre-move_usability fallback
+      -- below is the original Assault-Vest-only filter, kept for an older boot.
+      local banned = mod.exports.itemMoveBanned
+      local filtered = {}
+      if not banned then
+        if itemOf(mon, true) ~= "ASSAULT_VEST" then return out end
+        local nationalDex = mod.find and mod.find("national_dex")
+        local moveById = nationalDex and nationalDex.exports and nationalDex.exports.moveById
+        if not moveById then return out end
+        for _, move in ipairs(out) do
+          local ok, info = pcall(moveById, move.id)
+          if move.id == "MEFIRST" or not (ok and info and info.damageClass == "status") then
+            filtered[#filtered + 1] = move
+          end
+        end
+        return filtered
       end
+      for _, move in ipairs(out) do
+        if not banned(self, mon, move.id) then filtered[#filtered + 1] = move end
+      end
+      return filtered
     end
-    return filtered
   end
 
-  mod.log:info("g9-battle-engine-beta: modern_held_items_phase2 installed (non-consumable "
+  mod.log:info("g9-battle-engine: modern_held_items_phase2 installed (non-consumable "
     .. "combat items: Choice Band/Specs/Scarf, Life Orb, Assault Vest, Eviolite, Expert Belt, "
     .. "Rocky Helmet, Black Sludge, Light Clay, Quick Powder, Iron Ball, Lagging Tail, "
     .. "Full Incense, Deep Sea Tooth/Scale, Soul Dew, the three Sinnoh orbs; Light Ball/"

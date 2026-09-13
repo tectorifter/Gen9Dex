@@ -14,7 +14,8 @@
 -- for the real once-per-switch-in limit national_dex's own Protean/Libero
 -- notes both call out explicitly.
 return function(mod, data)
-  local Battle = require("src.battle.gen2.Battle")
+  local gen2BattleOk, Battle = pcall(require, "src.battle.gen2.Battle")
+  Battle = gen2BattleOk and Battle or nil
   local abilityIdOf = mod.exports.abilityIdOf
   local setMonTypes = mod.exports.setMonTypes
   local canChangeType = mod.exports.canChangeType
@@ -23,23 +24,25 @@ return function(mod, data)
   assert(abilityIdOf and setMonTypes and canChangeType and hasUsed and markUsed,
     "onmove_type_change: ability_dispatch.lua and type_override_primitives.lua must load first")
 
-  local nativeUseMove = Battle.useMove
-  function Battle:useMove(attacker, defender, moveId)
-    if attacker and (attacker.hp or 0) > 0 then
-      local id = abilityIdOf(attacker)
-      if id and data[id] and not hasUsed(self, attacker) then
-        local def = self:moveDef(moveId)
-        local moveType = def and def.type
-        if moveType and canChangeType(self, attacker, { viaOpponent = false }) then
-          markUsed(self, attacker)
-          setMonTypes(self, attacker, { moveType })
-          self:emit({ kind = "message",
-            text = self:monName(attacker) .. " transformed into the " .. moveType .. " type!" })
+  if Battle then
+    local nativeUseMove = Battle.useMove
+    function Battle:useMove(attacker, defender, moveId)
+      if attacker and (attacker.hp or 0) > 0 then
+        local id = abilityIdOf(attacker)
+        if id and data[id] and not hasUsed(self, attacker) then
+          local def = self:moveDef(moveId)
+          local moveType = def and def.type
+          if moveType and canChangeType(self, attacker, { viaOpponent = false }) then
+            markUsed(self, attacker)
+            setMonTypes(self, attacker, { moveType })
+            self:emit({ kind = "message",
+              text = self:monName(attacker) .. " transformed into the " .. moveType .. " type!" })
+          end
         end
       end
+      return nativeUseMove(self, attacker, defender, moveId)
     end
-    return nativeUseMove(self, attacker, defender, moveId)
   end
 
-  mod.log:info("g9-battle-engine-beta: onmove_type_change ability engine installed (PROTEAN, LIBERO)")
+  mod.log:info("g9-battle-engine: onmove_type_change ability engine installed (PROTEAN, LIBERO)")
 end

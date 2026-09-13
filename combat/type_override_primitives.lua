@@ -43,7 +43,8 @@
 -- correct everywhere for free, mirroring real PS's own architecture
 -- exactly.
 return function(mod)
-  local Battle = require("src.battle.gen2.Battle")
+  local gen2Ok_Battle, Battle = pcall(require, "src.battle.gen2.Battle")
+  Battle = gen2Ok_Battle and Battle or nil
 
   ------------------------------------------------------------------
   -- The dictionary: every real change_type source this project knows
@@ -174,17 +175,17 @@ return function(mod)
   --    OPPONENT -- Soak/Magic Powder targeting a Dynamaxed mon always
   --    fails, the real Gen 8+ Dynamax immunity.
   --
-  --    NOT WIRED YET, stated honestly rather than guessed: battle_forms
-  --    (the sister mod that owns Dynamax/Gigantamax activation end to
-  --    end) exposes no queryable "is mon X dynamaxed right now" API --
-  --    its own active-Dynamax state (a dynamax.lua-local `state` table,
-  --    keyed by mon identity) is never put on mod.exports, confirmed by
-  --    reading that file directly. Only armState (which gimmick is ARMED
-  --    for the upcoming turn, a different question) and transforms (the
-  --    registry) are exported. The opponent-side Dynamax check below is
-  --    therefore a real, flagged gap -- always answers "not Dynamaxed"
-  --    until battle_forms exposes the state this needs, not silently
-  --    skipped without saying so.
+  --    WIRED (2026-09-12, plan phase 12): battle_forms itself still
+  --    exposes no queryable "is mon X dynamaxed right now" API (its own
+  --    active-Dynamax state is a dynamax.lua-local `state` table, never
+  --    put on mod.exports -- only armState, a different question, and
+  --    the transforms registry are). It does not need to: this mod's OWN
+  --    gigantamax/dynamax_battle.lua stamps `mon.__g9Dynamaxed = true`
+  --    on battle_forms' dynamax_applied event and clears it on
+  --    dynamax_reverted (dynamax_battle.lua:109/134), keyed on the LIVE
+  --    mon identity battle_forms' own payload carries. The opponent-side
+  --    check below reads that marker, so Soak/Magic Powder targeting a
+  --    Dynamaxed mon now fails as the real Gen 8+ rule requires.
   ------------------------------------------------------------------
   function mod.exports.canChangeType(battle, mon, opts)
     opts = opts or {}
@@ -192,9 +193,17 @@ return function(mod)
       return false
     end
     if opts.viaOpponent then
-      -- TODO: battle_forms has no exported "is this mon Dynamaxed/
-      -- Gigantamaxed right now" check yet (see this function's own header)
-      -- -- once it does, this branch should return false when mon is.
+      -- Dynamax/Gigantamax immunity (real Gen 8+; closes the header TODO):
+      -- a Dynamaxed mon can never have its type changed BY AN OPPONENT.
+      -- The marker is this mod's own gigantamax/dynamax_battle.lua
+      -- (mon.__g9Dynamaxed, set on battle_forms' dynamax_applied event and
+      -- cleared on dynamax_reverted). Both call shapes are probed: Gen 1
+      -- stores the raw mon at battle.player.mon, so a battler wrapper
+      -- still matches through .mon -- the same both-shapes probe
+      -- modern_hazards.lua's grounding check already uses.
+      if mon and (mon.__g9Dynamaxed or (mon.mon and mon.mon.__g9Dynamaxed)) then
+        return false
+      end
       -- Boss-fight "type" protection (combat/boss_fight.lua): the boss's
       -- type can't be changed by an opponent-directed effect (Soak et al)
       -- while active -- opts.viaOpponent is exactly "imposed from
@@ -232,11 +241,13 @@ return function(mod)
   -- The rest of clearVolatile runs unmodified first; this only adds the
   -- type-reset step real PS's own clearVolatile->setSpecies->setType chain
   -- already does as its last step.
-  local nativeClearVolatile = Battle.clearVolatile
-  function Battle:clearVolatile(mon)
-    nativeClearVolatile(self, mon)
-    if mon then mon.types = originalTypesOf(self, mon) end
+  if Battle then
+    local nativeClearVolatile = Battle.clearVolatile
+    function Battle:clearVolatile(mon)
+      nativeClearVolatile(self, mon)
+      if mon then mon.types = originalTypesOf(self, mon) end
+    end
   end
 
-  mod.log:info("g9-battle-engine-beta: type_override_primitives installed (setMonTypes, reset-on-clearVolatile, once-per-switch-in tracking)")
+  mod.log:info("g9-battle-engine: type_override_primitives installed (setMonTypes, reset-on-clearVolatile, once-per-switch-in tracking)")
 end

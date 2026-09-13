@@ -8,9 +8,11 @@
 -- itself is duplicated here.
 --
 -- ORICHALCUMPULSE carries a SECOND effect (a stat_multiplier Attack boost
--- while Sun is active) with no primitive yet (Phase 4 of the ability plan)
--- -- only its weather-setting half is wired here; the boost is a real,
--- flagged gap, not silently dropped.
+-- while Sun is active). That half is wired SEPARATELY from this file --
+-- abilities/data/stat_multiplier.lua (HADRONENGINE's twin entry; the real
+-- Showdown factor is 4/3, overridden in that file's own engine) -- and, by
+-- 2026-09-10, also applied inside combat/modern_combat.lua's modern damage
+-- path. Only the weather-setting half is listed here.
 --
 -- Explicit user decision (Phase 1.5, not this phase): Desolate Land,
 -- Primordial Sea, and Delta Stream -- each a stronger, irreplaceable

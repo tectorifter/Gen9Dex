@@ -7,8 +7,11 @@
 -- itself is duplicated here.
 --
 -- Hadron Engine's own second effect (a Sp. Atk stat_multiplier while
--- Electric Terrain is active) has no primitive yet -- Phase 4 -- and is a
--- real, flagged gap, not silently dropped.
+-- Electric Terrain is active) is wired SEPARATELY from this file --
+-- abilities/data/stat_multiplier.lua's own HADRONENGINE entry (the real
+-- Showdown factor is 4/3, overridden in that file's own engine) -- and, by
+-- 2026-09-10, also applied inside combat/modern_combat.lua's modern damage
+-- path. Only the terrain-setting half is listed here.
 --
 -- Seed Sower is NOT here: its real trigger is on_hit_taken, not switch_in
 -- -- a different phase, same reasoning as weather_switchin.lua's own Sand

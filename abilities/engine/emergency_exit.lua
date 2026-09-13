@@ -29,5 +29,5 @@ return function(mod, data)
     requestSwitch(battle, target, { reason = id, text = text })
   end)
 
-  mod.log:info("g9-battle-engine-beta: emergency_exit installed (EMERGENCYEXIT, WIMPOUT)")
+  mod.log:info("g9-battle-engine: emergency_exit installed (EMERGENCYEXIT, WIMPOUT)")
 end

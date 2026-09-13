@@ -25,9 +25,22 @@ return function(mod, data)
     paralysis = { gen1 = "PAR", gen2 = "paralyze" }, toxic = { gen1 = "PSN", gen2 = "toxic", isToxic = true },
     sleep = { gen1 = "SLP", gen2 = "sleep" },
   }
-  local function inflict(battle, gen2, mon, canonical, moveType)
+  local function inflict(battle, gen2, mon, canonical, moveType, source)
     local codes = STATUS_CODES[canonical]
     if not codes then return end
+    -- Phase 11 (Corrosion): the real TYPE-based status immunity (Fire can't
+    -- be burned, Poison/Steel can't be poisoned) that neither status
+    -- primitive enforces -- see combat/modern_combat.lua's own
+    -- statusTypeImmune header. `source` is the inflicting mon where the
+    -- call site knows it; Corrosion pierces the poison half exactly as it
+    -- does on the move-secondary path.
+    local statusTypeImmune = mod.exports.statusTypeImmune
+    if statusTypeImmune and statusTypeImmune(battle, mon, canonical) then
+      local corrosionPiercesPoison = mod.exports.corrosionPiercesPoison
+      local pierce = (canonical == "poison" or canonical == "toxic")
+        and corrosionPiercesPoison and corrosionPiercesPoison(source)
+      if not pierce then return end
+    end
     if gen2 then
       battle:applyStatus(mon, codes.gen2, "ability")
     else
@@ -83,7 +96,7 @@ return function(mod, data)
     if statusName then
       local roll = gen2 and battle.random(10) or (battle.rng(1, 10) - 1)
       if roll < 3 and not currentStatusOf(user, gen2) then
-        inflict(battle, gen2, user, statusName)
+        inflict(battle, gen2, user, statusName, nil, target)
       end
       return
     end
@@ -92,9 +105,9 @@ return function(mod, data)
       if isGrassType(user, gen2) then return end
       if currentStatusOf(user, gen2) then return end
       local roll = gen2 and battle.random(100) or (battle.rng(1, 100) - 1)
-      if roll < 11 then inflict(battle, gen2, user, "sleep")
-      elseif roll < 21 then inflict(battle, gen2, user, "paralysis")
-      elseif roll < 30 then inflict(battle, gen2, user, "poison") end
+      if roll < 11 then inflict(battle, gen2, user, "sleep", nil, target)
+      elseif roll < 21 then inflict(battle, gen2, user, "paralysis", nil, target)
+      elseif roll < 30 then inflict(battle, gen2, user, "poison", nil, target) end
       return
     end
   end)
@@ -119,14 +132,14 @@ return function(mod, data)
       if not (flags and flags.contact) then return end
       if currentStatusOf(target, gen2) then return end
       local roll = gen2 and battle.random(10) or (battle.rng(1, 10) - 1)
-      if roll < 3 then inflict(battle, gen2, target, "poison") end
+      if roll < 3 then inflict(battle, gen2, target, "poison", nil, user) end
       return
     end
 
     if id == "TOXICCHAIN" then
       if currentStatusOf(target, gen2) then return end
       local roll = gen2 and battle.random(10) or (battle.rng(1, 10) - 1)
-      if roll < 3 then inflict(battle, gen2, target, "toxic") end
+      if roll < 3 then inflict(battle, gen2, target, "toxic", nil, user) end
       return
     end
 
@@ -162,7 +175,7 @@ return function(mod, data)
     if not (battle and target and user and (ev.damage or 0) > 0) then return end
     if abilityIdOf(target) ~= "SPICYSPRAY" or not data.SPICYSPRAY then return end
     local gen2 = isGen2Battle(battle)
-    if not currentStatusOf(user, gen2) then inflict(battle, gen2, user, "burn") end
+    if not currentStatusOf(user, gen2) then inflict(battle, gen2, user, "burn", nil, target) end
   end)
 
   ------------------------------------------------------------------
@@ -229,19 +242,22 @@ return function(mod, data)
     return result
   end
 
-  local Battle = require("src.battle.gen2.Battle")
-  local nativeSyncApplyStatus = Battle.applyStatus
-  function Battle:applyStatus(mon, status, source)
-    local result = nativeSyncApplyStatus(self, mon, status, source)
-    if result and abilityIdOf(mon) == "SYNCHRONIZE" and data.SYNCHRONIZE and source ~= "synchronize" then
-      local canonical = SYNC_CANONICAL_GEN2[status]
-      local attacker = otherBattler(self, mon)
-      if canonical and attacker ~= mon and not currentStatusOf(attacker, true) then
-        Battle.applyStatus(self, attacker, STATUS_CODES[canonical].gen2, "synchronize")
+  local gen2Ok_Battle, Battle = pcall(require, "src.battle.gen2.Battle")
+  Battle = gen2Ok_Battle and Battle or nil
+  if Battle then
+    local nativeSyncApplyStatus = Battle.applyStatus
+    function Battle:applyStatus(mon, status, source)
+      local result = nativeSyncApplyStatus(self, mon, status, source)
+      if result and abilityIdOf(mon) == "SYNCHRONIZE" and data.SYNCHRONIZE and source ~= "synchronize" then
+        local canonical = SYNC_CANONICAL_GEN2[status]
+        local attacker = otherBattler(self, mon)
+        if canonical and attacker ~= mon and not currentStatusOf(attacker, true) then
+          Battle.applyStatus(self, attacker, STATUS_CODES[canonical].gen2, "synchronize")
+        end
       end
+      return result
     end
-    return result
   end
 
-  mod.log:info("g9-battle-engine-beta: inflict_status installed (CUTECHARM, EFFECTSPORE, FLAMEBODY, POISONPOINT, STATIC, POISONTOUCH, TOXICCHAIN, STENCH, SYNCHRONIZE, SPICYSPRAY)")
+  mod.log:info("g9-battle-engine: inflict_status installed (CUTECHARM, EFFECTSPORE, FLAMEBODY, POISONPOINT, STATIC, POISONTOUCH, TOXICCHAIN, STENCH, SYNCHRONIZE, SPICYSPRAY)")
 end

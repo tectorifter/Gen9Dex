@@ -322,58 +322,61 @@ return function(mod)
   -- everything else that never sets opts.move to one of these) 100%
   -- untouched.
   ------------------------------------------------------------------
-  local Battle2 = require("src.battle.gen2.Battle")
-  local FIXED_EFFECT_IDS = {
-    EFFECT_LEVEL_DAMAGE = true, EFFECT_SUPER_FANG = true,
-    EFFECT_PSYWAVE = true, EFFECT_STATIC_DAMAGE = true, EFFECT_OHKO = true,
-  }
-  local nativeDealDamage = Battle2.dealDamage
-  function Battle2:dealDamage(attacker, defender, damage, opts)
-    local effect = opts and opts.move and opts.move.effect
-    if effect and FIXED_EFFECT_IDS[effect] then
-      if effect == "EFFECT_PSYWAVE" then
-        -- Real modern formula, same fix as Gen 1's own (this file's own
-        -- header) -- self.random(n) returns 0..n-1 (confirmed by
-        -- gen2/Effects.lua's own real fixedDamage usage), so
-        -- self.random(101)+50 gives a real inclusive [50,150] range.
-        damage = math.max(1, math.floor((attacker.level or 1)
-          * (self.random(101) + 50) / 100))
+  local gen2Ok_Battle2, Battle2 = pcall(require, "src.battle.gen2.Battle")
+  Battle2 = gen2Ok_Battle2 and Battle2 or nil
+  if Battle2 then
+    local FIXED_EFFECT_IDS = {
+      EFFECT_LEVEL_DAMAGE = true, EFFECT_SUPER_FANG = true,
+      EFFECT_PSYWAVE = true, EFFECT_STATIC_DAMAGE = true, EFFECT_OHKO = true,
+    }
+    local nativeDealDamage = Battle2.dealDamage
+    function Battle2:dealDamage(attacker, defender, damage, opts)
+      local effect = opts and opts.move and opts.move.effect
+      if effect and FIXED_EFFECT_IDS[effect] then
+        if effect == "EFFECT_PSYWAVE" then
+          -- Real modern formula, same fix as Gen 1's own (this file's own
+          -- header) -- self.random(n) returns 0..n-1 (confirmed by
+          -- gen2/Effects.lua's own real fixedDamage usage), so
+          -- self.random(101)+50 gives a real inclusive [50,150] range.
+          damage = math.max(1, math.floor((attacker.level or 1)
+            * (self.random(101) + 50) / 100))
+        end
+        -- Wonder Guard's own real hard gate (2026-08-28, Wonder-Guard-
+        -- reachability review). NOT re-checking plain type immunity here
+        -- -- native Gen 2 already resolved that BEFORE ever calling
+        -- dealDamage (this file's own header, "Gen 2's own native fixed-
+        -- damage type-immunity check ... is ALREADY correct") -- so
+        -- resolvedMult below feeds Wonder Guard's super-effective check
+        -- only. Real, confirmed, honestly-flagged gap left open: that
+        -- native pre-check has no knowledge of this mod's own Foresight/
+        -- Miracle Eye/Smack Down/Scrappy/Mind's Eye negation fields, so a
+        -- Scrappy user's Super Fang/Seismic-Toss-family hit against a
+        -- Ghost-type on GEN 2 specifically still wrongly whiffs at the
+        -- native layer before this wrap ever runs -- Gen 1's own
+        -- equivalent (this file's own MoveEffects.chooseDamage overrides
+        -- above) does NOT have this gap, since THIS mod owns that gate
+        -- directly there. Same class of gap as Magic Guard's own
+        -- documented Gen 2 recoil/sandstorm-chip gaps (abilities/engine/
+        -- damage_immunity.lua's own header) -- no clean extension point
+        -- inside Gen 2's native pre-dealDamage accuracy/immunity check
+        -- without touching gen1recomp-dev's own source, which this mod
+        -- never does.
+        local resolvedTypeMult = mod.exports.resolvedTypeMult
+        local mult = resolvedTypeMult and resolvedTypeMult(self, attacker, defender, true, opts.move.type)
+          or (typeImmune(opts.move.type, defender.types) and 0 or 10)
+        if effect == "EFFECT_OHKO" then
+          -- Round 17 (Showdown, gen 4+): OHKO damage = the target's MAX HP,
+          -- not a magic huge number -- must guarantee the faint even if the
+          -- target heals after this number is computed but before it lands.
+          damage = maxHpOf(defender)
+        end
+        damage = wonderGuardAdjust(self, attacker, defender, opts.move, mult, true, damage)
+        local adjusted, info = routeThroughBattleDamage(self, attacker, defender,
+          opts.move, damage, { crit = false, typeMult = 10, ohko = effect == "EFFECT_OHKO", trueDamage = true }, true)
+        return nativeDealDamage(self, attacker, defender, adjusted, opts)
       end
-      -- Wonder Guard's own real hard gate (2026-08-28, Wonder-Guard-
-      -- reachability review). NOT re-checking plain type immunity here
-      -- -- native Gen 2 already resolved that BEFORE ever calling
-      -- dealDamage (this file's own header, "Gen 2's own native fixed-
-      -- damage type-immunity check ... is ALREADY correct") -- so
-      -- resolvedMult below feeds Wonder Guard's super-effective check
-      -- only. Real, confirmed, honestly-flagged gap left open: that
-      -- native pre-check has no knowledge of this mod's own Foresight/
-      -- Miracle Eye/Smack Down/Scrappy/Mind's Eye negation fields, so a
-      -- Scrappy user's Super Fang/Seismic-Toss-family hit against a
-      -- Ghost-type on GEN 2 specifically still wrongly whiffs at the
-      -- native layer before this wrap ever runs -- Gen 1's own
-      -- equivalent (this file's own MoveEffects.chooseDamage overrides
-      -- above) does NOT have this gap, since THIS mod owns that gate
-      -- directly there. Same class of gap as Magic Guard's own
-      -- documented Gen 2 recoil/sandstorm-chip gaps (abilities/engine/
-      -- damage_immunity.lua's own header) -- no clean extension point
-      -- inside Gen 2's native pre-dealDamage accuracy/immunity check
-      -- without touching gen1recomp-dev's own source, which this mod
-      -- never does.
-      local resolvedTypeMult = mod.exports.resolvedTypeMult
-      local mult = resolvedTypeMult and resolvedTypeMult(self, attacker, defender, true, opts.move.type)
-        or (typeImmune(opts.move.type, defender.types) and 0 or 10)
-      if effect == "EFFECT_OHKO" then
-        -- Round 17 (Showdown, gen 4+): OHKO damage = the target's MAX HP,
-        -- not a magic huge number -- must guarantee the faint even if the
-        -- target heals after this number is computed but before it lands.
-        damage = maxHpOf(defender)
-      end
-      damage = wonderGuardAdjust(self, attacker, defender, opts.move, mult, true, damage)
-      local adjusted, info = routeThroughBattleDamage(self, attacker, defender,
-        opts.move, damage, { crit = false, typeMult = 10, ohko = effect == "EFFECT_OHKO", trueDamage = true }, true)
-      return nativeDealDamage(self, attacker, defender, adjusted, opts)
+      return nativeDealDamage(self, attacker, defender, damage, opts)
     end
-    return nativeDealDamage(self, attacker, defender, damage, opts)
   end
 
   ------------------------------------------------------------------
@@ -658,18 +661,18 @@ return function(mod)
             end
           end
         end
-        mod.log:info("g9-battle-engine-beta: legacy_move_takeover: Counter's own real "
+        mod.log:info("g9-battle-engine: legacy_move_takeover: Counter's own real "
           .. "counterable flag patched onto %d move(s) (category-based, real modern rule, "
           .. "replacing Gen 1's own real type-based cartridge check)", patched)
       end)
       if not runOk then
-        mod.log:warn("g9-battle-engine-beta: legacy_move_takeover: Counter counterable "
+        mod.log:warn("g9-battle-engine: legacy_move_takeover: Counter counterable "
           .. "bulk-patch errored, skipped (%s)", tostring(runErr))
       end
     end
   end
 
-  mod.log:info("g9-battle-engine-beta: legacy_move_takeover installed, both generations "
+  mod.log:info("g9-battle-engine: legacy_move_takeover installed, both generations "
     .. "(SEISMICTOSS, NIGHTSHADE, DRAGONRAGE, SONICBOOM, PSYWAVE, SUPERFANG, "
     .. "FISSURE/GUILLOTINE/HORNDRILL centralized through battle.damage; SHEERCOLD, "
     .. "FINALGAMBIT, NATURESMADNESS/RUINATION built fresh; COUNTER family (METALBURST, "

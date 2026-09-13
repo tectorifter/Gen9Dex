@@ -47,12 +47,17 @@ return function(mod, data)
   -- defended against the battler-vs-flat-mon shape difference the same
   -- way status_immunity.lua's canonicalStatusOf already is.
   local function hpOf(mon) return (mon.mon or mon) end
-  local function healFraction(mon, fraction)
+  local function healFraction(battle, mon, fraction)
     local m = hpOf(mon)
     local maxHp = m.stats and m.stats.hp
     if not (maxHp and maxHp > 0 and (m.hp or 0) < maxHp) then return end
     local amount = math.max(1, math.floor(maxHp * fraction))
-    m.hp = math.min(maxHp, (m.hp or 0) + amount)
+    local tryHeal = mod.exports.g9TryHeal
+    if tryHeal then
+      tryHeal(battle, mon, amount)
+    else
+      m.hp = math.min(maxHp, (m.hp or 0) + amount)
+    end
   end
   local function damageSelfFraction(mon, fraction)
     local m = hpOf(mon)
@@ -90,7 +95,7 @@ return function(mod, data)
           -- that collision if this check were dropped).
           if eff.kind == cfg.kind and eff.fraction and eff.when
               and eff.when:match("^each turn") then
-            if cfg.kind == "heal" then healFraction(mon, eff.fraction)
+            if cfg.kind == "heal" then healFraction(battle, mon, eff.fraction)
             else damageSelfFraction(mon, eff.fraction) end
           end
         end
@@ -131,21 +136,26 @@ return function(mod, data)
   Status.RECORDS.PSN.residual = function(battler, opponent, battle)
     local fraction = poisonHealAmount(battler)
     if fraction then
-      healFraction(battler, fraction)
+      healFraction(battle, battler, fraction)
       return {}
     end
     return nativePsnResidual(battler, opponent, battle)
   end
 
-  local Battle = require("src.battle.gen2.Battle")
+  -- Gen 2's own STATUSES table lives in src.battle.gen2.Battle, which a Gen 1
+  -- game refuses to require (crossGenerationDenial). Guarded so this whole
+  -- file -- DRYSKIN/ICEBODY/RAINDISH/POISONHEAL/HOSPITALITY/REGENERATOR --
+  -- still installs its Gen-1 half instead of failing the boot.
+  local gen2ok, Battle = pcall(require, "src.battle.gen2.Battle")
   local function patchGen2PoisonResidual(statusKey)
+    if not (gen2ok and type(Battle) == "table") then return end
     local record = Battle.STATUSES[statusKey]
     if not record then return end
     local native = record.residual
     record.residual = function(battle, mon, maxHp)
       local fraction = poisonHealAmount(mon)
       if fraction then
-        healFraction(mon, fraction)
+        healFraction(battle, mon, fraction)
         return 0 -- Battle:tickStatus skips the emit/hp-write when damage<=0
       end
       return native(battle, mon, maxHp)
@@ -171,7 +181,7 @@ return function(mod, data)
     local fraction = hospitalityFraction(mon)
     if not fraction then return end
     for _, ally in ipairs(requestAdjacency(battle, mon, nil).allies) do
-      healFraction(ally, fraction)
+      healFraction(battle, ally, fraction)
     end
   end
 
@@ -202,9 +212,9 @@ return function(mod, data)
     -- when switched out due to fainting.
     if previous and (previous.hp or 0) > 0 then
       local fraction = regeneratorFraction(previous)
-      if fraction then healFraction(previous, fraction) end
+      if fraction then healFraction(battle, previous, fraction) end
     end
   end)
 
-  mod.log:info("g9-battle-engine-beta: heal installed (DRYSKIN, ICEBODY, RAINDISH, POISONHEAL, HOSPITALITY, REGENERATOR)")
+  mod.log:info("g9-battle-engine: heal installed (DRYSKIN, ICEBODY, RAINDISH, POISONHEAL, HOSPITALITY, REGENERATOR)")
 end

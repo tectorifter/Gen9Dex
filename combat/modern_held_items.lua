@@ -8,9 +8,15 @@
 -- behavior outright, the same principle combat/legacy_move_takeover.lua
 -- already established for the nine classic damage moves ("it's
 -- imperative all damage goes through us, else we lose turn order
--- control"). Gen 1 has no items at all (confirmed, combat/modern_items
--- .lua's own header) -- every item in this file is structurally
--- Gen-2-only, matching that same established boundary.
+-- control"). Gen 1 stores held items in the mod-owned save slot
+-- `mon.g9HeldItem` (combat/modern_held_item_api.lua), and round 99 made this
+-- file's per-item readers gen-aware: BrightPowder, Scope Lens and the crit
+-- items (Lucky Punch/Stick) now read and enforce on BOTH generations (via the
+-- local `heldItemAny`). The items whose real native mechanism is the
+-- Gen-2-only `held_item.trigger` hook -- Quick Claw, Focus Band, King's
+-- Rock's roll, Leftovers, the berry auto-eat -- stay Gen-2 here on purpose;
+-- their Gen-1 behaviour is combat/modern_gen1_held_items.lua's job precisely
+-- because Gen 1 has no such hook.
 --
 -- Real mechanism: `held_item.trigger` (gen2/Battle.lua's own real,
 -- already-mod-hookable choke point EVERY native held-item effect goes
@@ -123,6 +129,19 @@ return function(mod)
     "modern_held_items: combat/modern_items.lua, combat/modern_combat.lua and "
       .. "abilities/engine/accuracy_multiplier.lua must all load first")
 
+  -- Either generation's held-item slot: Gen 2's native mon.item first, else
+  -- Gen 1's saved g9HeldItem (via the gen-aware itemOf). A mon cannot hold
+  -- both (Gen 1 has no .item field anywhere in the engine), so this is
+  -- unambiguous -- and it keeps the accuracy/crit chains working on
+  -- modernCritRoll's direct-call path, where the ctx carries no battle to
+  -- derive a generation from.
+  local function heldItemAny(who)
+    return itemOf(who, true) or itemOf(who, false)
+  end
+
+  -- Raw mon behind a Gen-1 battler wrapper, or the mon itself on Gen 2.
+  local function rawMon(who) return who and (who.mon or who) or nil end
+
   ------------------------------------------------------------------
   -- Quick Claw / Focus Band / King's Rock / type-boost items / Bright
   -- Powder -- one shared "held_item.trigger" wrap, keyed on (item id,
@@ -194,8 +213,8 @@ return function(mod)
   -- moveAccuracy's own `self:heldEffect(defender, "accuracy")`.
   ------------------------------------------------------------------
   registerAccuracyModifier("brightpowder", 0, function(ctx)
-    if not (ctx.target and isGen2Battle(ctx.battle)) then return 1.0 end
-    if itemOf(ctx.target, true) ~= "BRIGHTPOWDER" then return 1.0 end
+    if not ctx.target then return 1.0 end
+    if heldItemAny(ctx.target) ~= "BRIGHTPOWDER" then return 1.0 end
     return 3686 / 4096
   end)
 
@@ -207,11 +226,50 @@ return function(mod)
   -- `ctx.user.focusEnergy` check right above where this chain runs).
   ------------------------------------------------------------------
   registerCritStageModifier("scopelens", function(ctx)
-    if not (ctx.user and isGen2Battle(ctx.battle)) then return 0 end
-    return itemOf(ctx.user, true) == "SCOPE_LENS" and 1 or 0
+    if not ctx.user then return 0 end
+    return heldItemAny(ctx.user) == "SCOPE_LENS" and 1 or 0
   end)
 
-  mod.log:info("g9-battle-engine-beta: modern_held_items installed, Phase 1 native-item "
+  ------------------------------------------------------------------
+  -- Lucky Punch / Stick (Phase 28) -- the other two real crit items, the
+  -- ones the Scope Lens work above left behind. Both are +2 crit stages
+  -- (items.ts:3517 luckypunch, :6092 stick), unlike Scope Lens's +1, and
+  -- both are species-locked: Lucky Punch only helps Chansey, Stick only
+  -- Farfetch'd. The species list is read from national_dex's own `itemUser`
+  -- fact through combat/modern_item_facts.lua (`itemSpeciesMatch`), so the
+  -- gate is data-driven rather than a second hand table; a hardcoded
+  -- fallback covers a load order without the facts module. This is a
+  -- COMPANION entry to the Scope Lens one above -- modernCritStage sums
+  -- every registered entry, so the two compose (a mon holds one item, so
+  -- only ever one of them is non-zero).
+  ------------------------------------------------------------------
+  local function critSpeciesAllowed(id, species)
+    local match = mod.exports.itemSpeciesMatch
+    if match then
+      local ok, res = pcall(match, id, species)
+      if ok and res ~= nil then return res end
+    end
+    if id == "LUCKY_PUNCH" then return species == "CHANSEY" end
+    if id == "STICK" then return species == "FARFETCHD" or species == "FARFETCH_D" end
+    return false
+  end
+  local function critItemStage(id, species)
+    if (id == "LUCKY_PUNCH" or id == "STICK") and critSpeciesAllowed(id, species) then
+      return 2
+    end
+    return 0
+  end
+  registerCritStageModifier("crititems", function(ctx)
+    if not ctx.user then return 0 end
+    local m = rawMon(ctx.user)
+    return critItemStage(heldItemAny(ctx.user), m and m.species)
+  end)
+  -- Exported (pure) so the harness can assert the species gate directly.
+  mod.exports.critItemStage = critItemStage
+  mod.exports.critSpeciesAllowed = critSpeciesAllowed
+
+  mod.log:info("g9-battle-engine: modern_held_items installed, Phase 1 native-item "
     .. "audit (QUICK_CLAW, FOCUS_BAND, KINGS_ROCK, BRIGHTPOWDER, the type-boost family, "
-    .. "SCOPE_LENS corrected to real Gen 9 values/shapes; LEFTOVERS verified unchanged)")
+    .. "SCOPE_LENS corrected to real Gen 9 values/shapes; LEFTOVERS verified unchanged; "
+    .. "Phase 28 LUCKY_PUNCH/STICK +2 crit)")
 end

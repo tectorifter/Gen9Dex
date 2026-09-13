@@ -71,7 +71,9 @@ return function(mod, data)
     return false
   end
 
-  local Battle = require("src.battle.gen2.Battle")
+  local gen2BattleOk, Battle = pcall(require, "src.battle.gen2.Battle")
+  Battle = gen2BattleOk and Battle or nil
+  if Battle then
   local nativeUseMovePreventMisc = Battle.useMove
   function Battle:useMove(attacker, defender, moveId)
     if EXPLOSIVE_MOVES[moveId] and anyBattlerHasDamp(self) then
@@ -110,6 +112,7 @@ return function(mod, data)
     end
     return nativeStatusPenaltyFor(battleData, mon, stat, value)
   end
+  end
 
-  mod.log:info("g9-battle-engine-beta: prevent_misc installed (DAMP, GORILLATACTICS, QUICKFEET, GUTS, SUCTIONCUPS, GUARDDOG)")
+  mod.log:info("g9-battle-engine: prevent_misc installed (DAMP, GORILLATACTICS, QUICKFEET, GUTS, SUCTIONCUPS, GUARDDOG)")
 end

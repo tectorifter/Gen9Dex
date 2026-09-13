@@ -44,5 +44,5 @@ return function(mod, data)
     return delta
   end)
 
-  mod.log:info("g9-battle-engine-beta: crit_change installed (SUPERLUCK, MERCILESS)")
+  mod.log:info("g9-battle-engine: crit_change installed (SUPERLUCK, MERCILESS)")
 end

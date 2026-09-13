@@ -30,15 +30,18 @@ return function(mod, data)
       end
     end)
     guard[battle] = nil
-    if not ok then mod.log:warn("g9-battle-engine-beta: dancer cascade failed: %s", tostring(err)) end
+    if not ok then mod.log:warn("g9-battle-engine: dancer cascade failed: %s", tostring(err)) end
   end
 
-  local Battle = require("src.battle.gen2.Battle")
-  local nativeUseMoveDancer = Battle.useMove
-  function Battle:useMove(attacker, defender, moveId)
-    local result = nativeUseMoveDancer(self, attacker, defender, moveId)
-    cascade(self, nativeUseMoveDancer, attacker, defender, moveId)
-    return result
+  local gen2BattleOk, Battle = pcall(require, "src.battle.gen2.Battle")
+  Battle = gen2BattleOk and Battle or nil
+  if Battle then
+    local nativeUseMoveDancer = Battle.useMove
+    function Battle:useMove(attacker, defender, moveId)
+      local result = nativeUseMoveDancer(self, attacker, defender, moveId)
+      cascade(self, nativeUseMoveDancer, attacker, defender, moveId)
+      return result
+    end
   end
 
   local BattleState = require("src.battle.BattleState")
@@ -54,5 +57,5 @@ return function(mod, data)
     return result
   end
 
-  mod.log:info("g9-battle-engine-beta: dancer installed (DANCER)")
+  mod.log:info("g9-battle-engine: dancer installed (DANCER)")
 end

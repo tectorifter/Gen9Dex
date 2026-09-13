@@ -82,6 +82,34 @@ return function(mod)
     return false
   end
 
+  -- Ignore-ability (Phase 18, missing-effects plan): Showdown's real
+  -- `move.ignoreAbility` family (Moongeist Beam / Sunsteel Strike, both
+  -- `ignoreAbility: true` -- moves.ts:12229 / :18432). Unlike Mold
+  -- Breaker (a persistent ATTACKER-side family the ability sites have to
+  -- consult individually, see modern_combat.lua's own
+  -- attackerIgnoresDefenderAbility) this is a single-move, single-target
+  -- suppression the move's own damage computation must completely blind
+  -- every ability read to. That has to happen inside abilityIdOf --
+  -- the one real choke point every ability check in this mod funnels
+  -- through -- for the same reason Neutralizing Gas lives here: every
+  -- engine file captures `local abilityIdOf = mod.exports.abilityIdOf`
+  -- ONCE at its own install time, so a later reassignment would never
+  -- reach those captured locals. A single module-local `ignoredAbilityMon`
+  -- set by combat/modern_guard_contact.lua's own battle.damage wrap for
+  -- the duration of one damage computation (and cleared immediately
+  -- after, error or not) is the only mechanism that reaches a
+  -- computeModernDamage call stack that already holds an
+  -- abilityIdOf reference from install time. Checked AFTER the
+  -- raw-id lookup (so a mon with no ability still returns nil, and the
+  -- suppression never invents an id) and deliberately OUTSIDE the
+  -- Neutralizing Gas exemption list -- ignoring an ability is the entire
+  -- point of this move family, so even an NGAS-exempt form ability is
+  -- suppressed while the flag is held.
+  local ignoredAbilityMon = nil
+  function mod.exports.setIgnoredAbilityMon(mon)
+    ignoredAbilityMon = mon
+  end
+
   -- mon.ability stores a display name ("Intimidate", "As One (Glastrier)");
   -- national_dex's own ids strip everything but letters/digits and
   -- uppercase (confirmed directly against real records: "As One
@@ -89,6 +117,7 @@ return function(mod)
   local function abilityIdOf(mon)
     local id = rawAbilityId(mon and mon.ability)
     if not id then return nil end
+    if mon ~= nil and mon == ignoredAbilityMon then return nil end
     if not NGAS_EXEMPT[id] and neutralizingGasActive() then return nil end
     return id
   end
@@ -184,5 +213,5 @@ return function(mod)
     restoreNaturalAbility(battle.enemy)
   end)
 
-  mod.log:info("g9-battle-engine-beta: ability_dispatch installed (abilityIdOf, abilityBehaviorOf, setAbility, boss-immune + combat-only)")
+  mod.log:info("g9-battle-engine: ability_dispatch installed (abilityIdOf, abilityBehaviorOf, setAbility, boss-immune + combat-only)")
 end

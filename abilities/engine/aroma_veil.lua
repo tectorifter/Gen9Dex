@@ -31,15 +31,18 @@ return function(mod, data)
     return false
   end
 
-  local Battle = require("src.battle.gen2.Battle")
-  local nativeUseMoveAromaVeil = Battle.useMove
-  function Battle:useMove(attacker, defender, moveId)
-    if MENTAL_MOVES[moveId] and defender and defender ~= attacker
-        and protectedByAromaVeil(self, defender) then
-      self:emit({ kind = "message", text = "But, it failed!" })
-      return
+  local gen2BattleOk, Battle = pcall(require, "src.battle.gen2.Battle")
+  Battle = gen2BattleOk and Battle or nil
+  if Battle then
+    local nativeUseMoveAromaVeil = Battle.useMove
+    function Battle:useMove(attacker, defender, moveId)
+      if MENTAL_MOVES[moveId] and defender and defender ~= attacker
+          and protectedByAromaVeil(self, defender) then
+        self:emit({ kind = "message", text = "But, it failed!" })
+        return
+      end
+      return nativeUseMoveAromaVeil(self, attacker, defender, moveId)
     end
-    return nativeUseMoveAromaVeil(self, attacker, defender, moveId)
   end
 
   local BattleState = require("src.battle.BattleState")
@@ -53,5 +56,5 @@ return function(mod, data)
     return nativePerformMoveAromaVeil(self, user, target, moveInst, isCalled)
   end
 
-  mod.log:info("g9-battle-engine-beta: aroma_veil installed (AROMAVEIL)")
+  mod.log:info("g9-battle-engine: aroma_veil installed (AROMAVEIL)")
 end

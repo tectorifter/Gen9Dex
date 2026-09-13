@@ -80,5 +80,5 @@ return function(mod, data)
     if battle and isGen2Battle(battle) then reapplyBothSides(battle) end
   end)
 
-  mod.log:info("g9-battle-engine-beta: forecast_weather ability engine installed (FORECAST)")
+  mod.log:info("g9-battle-engine: forecast_weather ability engine installed (FORECAST)")
 end

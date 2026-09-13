@@ -99,5 +99,5 @@ return function(mod, data)
     end
   end)
 
-  mod.log:info("g9-battle-engine-beta: cudchew installed (CUDCHEW)")
+  mod.log:info("g9-battle-engine: cudchew installed (CUDCHEW)")
 end

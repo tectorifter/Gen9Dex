@@ -23,12 +23,14 @@
 -- opt-out for players who don't want this mechanic factored in at all,
 -- not a "keep the narrow native behavior" middle state.
 return function(mod)
-  local Battle = require("src.battle.gen2.Battle")
+  local gen2BattleOk, Battle = pcall(require, "src.battle.gen2.Battle")
+  Battle = gen2BattleOk and Battle or nil
 
   local function badgeBuffOn()
     return mod.options:get("gym_badge_buff") == "true"
   end
 
+  if Battle then
   local nativeBattleStat = Battle.battleStat
   function Battle:battleStat(mon, key)
     if not badgeBuffOn() then
@@ -66,6 +68,7 @@ return function(mod)
     end
     return nativeBadgeTypeBoost(self, attacker, moveType)
   end
+  end
 
-  mod.log:info("g9-battle-engine-beta: gym_badge_buff installed (real N-way badge stat/type boost, togglable via GYM BADGE BUFF option)")
+  mod.log:info("g9-battle-engine: gym_badge_buff installed (real N-way badge stat/type boost, togglable via GYM BADGE BUFF option)")
 end

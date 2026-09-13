@@ -24,16 +24,22 @@ return function(mod, data)
   end
 
   ------------------------------------------------------------------
-  -- IRONBARBS -- any landed contact hit, real national_dex moveFlags
-  -- (the same `contact` flag combat/move_targeting.lua's own header
-  -- catalogues, confirmed real earlier this session).
+  -- IRONBARBS / ROUGHSKIN -- any landed contact hit, real national_dex
+  -- moveFlags (the same `contact` flag combat/move_targeting.lua's own
+  -- header catalogues, confirmed real earlier this session). Both are
+  -- Showdown's identical `onDamagingHit` recoil -- `this.damage(source
+  -- .baseMaxhp / 8, source, target)` (abilities.ts:2228 ironbarbs,
+  -- abilities.ts:3942 roughskin): the ATTACKER loses 1/8 of its OWN max
+  -- HP, the same basis `damageFraction(user, 1/8)` below already uses.
+  -- Kept on one shared handler so the two can never drift apart.
   ------------------------------------------------------------------
   mod.events:on("battle.damage_dealt", function(ev)
     local target = ev and ev.target
     local user = ev and ev.user
     local move = ev and ev.move
     if not (target and user and move and (ev.damage or 0) > 0) then return end
-    if abilityIdOf(target) ~= "IRONBARBS" then return end
+    local id = abilityIdOf(target)
+    if id ~= "IRONBARBS" and id ~= "ROUGHSKIN" then return end
     -- Long Reach (Phase 7): the real "did this attacker's move make
     -- contact" answer, ability-aware -- see abilities/engine/long_reach
     -- .lua's own header.
@@ -109,5 +115,5 @@ return function(mod, data)
     return dmg, info
   end, 45)
 
-  mod.log:info("g9-battle-engine-beta: contact_retaliation installed (IRONBARBS, AFTERMATH, INNARDSOUT, LIQUIDOOZE)")
+  mod.log:info("g9-battle-engine: contact_retaliation installed (IRONBARBS, ROUGHSKIN, AFTERMATH, INNARDSOUT, LIQUIDOOZE)")
 end

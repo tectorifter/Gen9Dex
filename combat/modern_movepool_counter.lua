@@ -147,14 +147,14 @@
 --    which IS the attacker) alongside the damage and deals the counter to
 --    THAT battler, failing if it is no longer out -- the user's rule for
 --    every counter-like move.
---  * Metal Burst priority -- the real counter family moves at priority -5;
---    national_dex's own METALBURST record says priority=0 (Counter and
---    Mirror Coat already carry -5), and turn_order.lua's movePriority reads
---    a record's own priority field first (explicit 0 included), so without
---    a patch Metal Burst shared the normal band and moved BEFORE the hit it
---    was answering whenever the user was faster -- the "Turn 0" sequence
---    (hit lands, then Metal Burst answers) could not happen. Patched onto
---    the live record below.
+--  * Metal Burst priority -- ROUND 32 correction: this is NOT a -5 move.
+--    national_dex is the absolute owner of priority (explicit user rule),
+--    and its own METALBURST record says priority=0 (only Counter and Mirror
+--    Coat are -5). The 21b round patched → -5 onto the live record under the
+--    mistaken belief the whole counter family shared the bracket; that patch
+--    is REMOVED. turn_order.lua's movePriority now reads priority straight
+--    from national_dex's own moveById reply, so no patch here is needed (or
+--    wanted) for any counter-family move.
 -- ROUND 21c (native-volatile leak, the follow-up report "something's still
 -- loading damage to metal burst and it's not clearing it -- when spammed it
 -- still kills pokemon despite no damage being dealt"). The 21b run still had
@@ -411,24 +411,13 @@ return function(mod)
   -- Counter finally resolves through THIS mod's run -> battle.damage.
   registerCounterFamily("GALAR_COUNTER_EFFECT", 2, 1, "physical")
 
-  -- ROUND 21b: Metal Burst must resolve AFTER the hit it answers -- the
-  -- whole counter family moves at real priority -5. Counter and Mirror
-  -- Coat already carry that in national_dex's own data; METALBURST's says
-  -- priority=0, and turn_order.lua's movePriority reads a record's own
-  -- priority field first (explicit 0 included), so without this patch
-  -- Metal Burst shared the normal band and moved BEFORE the incoming hit
-  -- whenever the user was faster -- nothing to answer, "But it failed!"
-  -- every turn, the exact Turn-0 sequence the user needs (hit lands, then
-  -- Metal Burst answers) impossible. Same live-record patch idiom as
-  -- modern_combat_protect.lua's own MAX_GUARD priority=4.
-  if mod.content and mod.content.moves then
-    local ok, err = pcall(function()
-      mod.content.moves:patch("METALBURST", { priority = -5 })
-    end)
-    if not ok then
-      mod.log:warn("g9-battle-engine-beta: modern_movepool_counter: Metal Burst priority patch failed (%s)", tostring(err))
-    end
-  end
+  -- METALBURST priority is owned by national_dex (its own record says 0 --
+  -- Metal Burst is NOT in Counter/Mirror Coat's -5 bracket). This engine no
+  -- longer overrides it: turn_order.lua's movePriority now reads the move's
+  -- priority from national_dex's own moveById reply, so a live-record patch
+  -- here would be both redundant and wrong. (The -5 patch this replaced was
+  -- added under the mistaken belief the whole counter family shared -5; the
+  -- real, dex-verified values are Counter -5, Mirror Coat -5, Metal Burst 0.)
 
   mod.log:info("galar_gmax_dex: modern_movepool_counter loaded")
 end

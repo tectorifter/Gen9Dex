@@ -111,5 +111,5 @@ return function(mod, data)
     end
   end)
 
-  mod.log:info("g9-battle-engine-beta: item_interaction installed (FRISK, MAGICIAN, PICKPOCKET, HARVEST)")
+  mod.log:info("g9-battle-engine: item_interaction installed (FRISK, MAGICIAN, PICKPOCKET, HARVEST)")
 end

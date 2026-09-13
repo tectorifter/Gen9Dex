@@ -43,5 +43,5 @@ return function(mod, data)
     end
   end)
 
-  mod.log:info("g9-battle-engine-beta: truant installed (TRUANT)")
+  mod.log:info("g9-battle-engine: truant installed (TRUANT)")
 end

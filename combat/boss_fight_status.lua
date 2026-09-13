@@ -54,9 +54,11 @@
 --       site instead, not through this event at all.
 --   LeechSeed: confirmed NOT implemented anywhere in this mod at all
 --   (national_dex registers the move id with effectModeled=false, same
---   "registered, no real effect" shape as MAGICROOM/WONDERROOM/
---   HEALBLOCK) -- nothing currently applies it to anything, so there is
---   nothing to gate; an honest no-op today, not silently pretended done.
+--   "registered, no real effect" shape) -- nothing currently applies it
+--   to anything, so there is nothing to gate; an honest no-op today, not
+--   silently pretended done. (MAGICROOM/WONDERROOM used to be named here
+--   as the same shape; both now have real field effects -- see combat/
+--   trick_room.lua.)
 --
 -- antiDrain: every drain-heal path found (native Gen 1 drainHalf, native
 -- Gen 2's Effects.DRAIN check in Battle:useMove, and this mod's own
@@ -74,20 +76,47 @@
 -- three drain implementations expose a pre-heal interception point this
 -- mod can reach without touching engine source.
 --
--- healblock: NOT enforced. HEALBLOCK is registered as a move id by
--- national_dex (confirmed) but has zero real implementation anywhere in
--- g9-battle-engine-beta -- nothing currently applies Heal Block to
--- anything, so like ability-changing and LeechSeed, this is an honest
--- no-op until the underlying mechanic exists, not silently skipped.
+-- healblock: ENFORCED (2026-09-10). The real enforcement lives in combat/
+-- heal_block.lua -- the ONE gate every HP-recovery source routes through,
+-- both generations. combat/boss_fight.lua's own flag list entry now points
+-- there. (Historically this file carried a "RESERVED, no enforcement" note
+-- here; the Heal Block move and this flag are both real now.)
 return function(mod)
   local StatusRegistry = require("src.battle.StatusRegistry")
-  local Battle = require("src.battle.gen2.Battle")
   local bossFightHas = mod.exports.bossFightHas
   assert(bossFightHas, "boss_fight_status: combat/boss_fight.lua must load first")
   local nationalDex = mod.find and mod.find("national_dex")
   assert(nationalDex and nationalDex.exports and nationalDex.exports.moveById,
     "boss_fight_status: national_dex must be loaded first")
   local moveById = nationalDex.exports.moveById
+
+  -- Gen-2's Battle module is needed ONLY for the applyStatus wrap below. On a
+  -- Gen 1 game that require is a hard cross-generation denial (the Loader
+  -- refuses every src.*.gen2.* name), so it is guarded: hardStatus on Gen 1 is
+  -- still fully enforced through StatusRegistry.inflict above, which is Gen
+  -- 1's real status primitive.
+  local gen2ok, Battle = pcall(require, "src.battle.gen2.Battle")
+
+  -- "is this battler on the protected enemy side", uniformly across both
+  -- generations. Gen 1's own BattleState:sideOf returns a side-record OBJECT
+  -- (not a string), so it cannot be compared to "enemy" -- the battler
+  -- wrapper's own isPlayer is the reliable Gen 1 signal, with identity
+  -- against battle.player/enemy as the raw-mon fallback.
+  local function sideIsEnemy(battle, who)
+    if not (battle and who) then return false end
+    local wrapper = who.mon and who or nil
+    if wrapper and wrapper.isPlayer ~= nil then return not wrapper.isPlayer end
+    local m = who.mon or who
+    if m.multiSide then return m.multiSide == "enemy" end
+    if m.isPlayer ~= nil then return not m.isPlayer end
+    if m == (battle.player and (battle.player.mon or battle.player)) then return false end
+    if m == (battle.enemy and (battle.enemy.mon or battle.enemy)) then return true end
+    if Battle and battle.sideOf then
+      local ok, s = pcall(battle.sideOf, battle, who)
+      if ok and (s == "player" or s == "enemy") then return s == "enemy" end
+    end
+    return false
+  end
 
   ------------------------------------------------------------------
   -- hardStatus
@@ -103,18 +132,20 @@ return function(mod)
   -- fight that includes escorts, not a narrower one.
   local nativeStatusInflict = StatusRegistry.inflict
   StatusRegistry.inflict = function(battle, target, status, opts)
-    if battle and target and battle:sideOf(target) == "enemy" and bossFightHas(battle, "hardStatus") then
+    if battle and target and sideIsEnemy(battle, target) and bossFightHas(battle, "hardStatus") then
       return {}
     end
     return nativeStatusInflict(battle, target, status, opts)
   end
 
-  local nativeApplyStatus = Battle.applyStatus
-  function Battle:applyStatus(mon, status, source)
-    if mon and self:sideOf(mon) == "enemy" and bossFightHas(self, "hardStatus") then
-      return
+  if gen2ok and type(Battle) == "table" then
+    local nativeApplyStatus = Battle.applyStatus
+    function Battle:applyStatus(mon, status, source)
+      if mon and sideIsEnemy(self, mon) and bossFightHas(self, "hardStatus") then
+        return
+      end
+      return nativeApplyStatus(self, mon, status, source)
     end
-    return nativeApplyStatus(self, mon, status, source)
   end
 
   ------------------------------------------------------------------
@@ -133,7 +164,7 @@ return function(mod)
   mod.events:on("battle.damage_dealt", function(ev)
     local battle = ev and ev.battle
     local target = ev and ev.target
-    if not (battle and target and battle:sideOf(target) == "enemy") then return end
+    if not (battle and target and sideIsEnemy(battle, target)) then return end
     if bossFightHas(battle, "softStatus") then
       local gen2 = mod.exports.isGen2Battle and mod.exports.isGen2Battle(battle)
       if gen2 then
@@ -161,16 +192,20 @@ return function(mod)
     local move = ev and ev.move
     local dealt = ev and ev.damage
     if not (battle and target and user and move and dealt and dealt > 0) then return end
-    if battle:sideOf(target) ~= "enemy" or not bossFightHas(battle, "antiDrain") then return end
+    if not sideIsEnemy(battle, target) or not bossFightHas(battle, "antiDrain") then return end
     local ok, info = pcall(moveById, move.id)
     local drainPercent = ok and info and (info.drain or 0) > 0 and info.drain or nil
     if not drainPercent then return end
     local harm = math.max(1, math.floor(dealt * drainPercent / 100))
     local userMon = user.mon or user
     userMon.hp = math.max(0, (userMon.hp or 0) - harm)
+    local displayNameFor = mod.exports.displayNameFor
+    local name = (displayNameFor and displayNameFor(battle, user,
+      mod.exports.isGen2Battle and mod.exports.isGen2Battle(battle)))
+      or (userMon.name or "The Pokemon")
     battle:emit({ kind = "message",
-      text = battle:monName(user) .. " was hurt trying to drain the boss!" })
+      text = name .. " was hurt trying to drain the boss!" })
   end)
 
-  mod.log:info("g9-battle-engine-beta: boss_fight_status installed (hardStatus, softStatus, antiDrain)")
+  mod.log:info("g9-battle-engine: boss_fight_status installed (hardStatus, softStatus, antiDrain)")
 end

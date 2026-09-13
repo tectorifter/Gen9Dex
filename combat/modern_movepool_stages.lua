@@ -377,5 +377,356 @@ return function(mod)
     battle:emit({ kind = "message", text = Strings("%s's stat\nchanges were\nremoved!", name) })
   end)
 
+  ------------------------------------------------------------------
+  -- Phase 15 of the missing-effects plan: self stat-stage boosts, plus
+  -- the target-directed drops that share the same primitive.
+  --
+  -- WHY THESE WERE DEAD. national_dex tags each of these 19 moves with a
+  -- real `statChanges` list, but `statChance = 0` -- an unconditional
+  -- whole-move change, not a secondary. installMovepoolEffects's generic
+  -- branch only fires when `statChance > 0` (main.lua's own `statChance`
+  -- computation), so none of them was ever applied. Their real Showdown
+  -- shape is the flat `boosts` map on a Status move (moves.ts, cited per
+  -- move below), which is exactly what the primary()/applyChange helpers
+  -- above already express: attack/defense/spa/spd land in modern_combat
+  -- .lua's own store (the one computeModernDamage reads), speed takes the
+  -- native path (Battle:changeStageAgainstMist on Gen 2, NativeMoveEffects
+  -- .changeStage on Gen 1).
+  --
+  -- FOUR OF THEM ALREADY HAD A NATIVE EFFECT ID (Baby-Doll Eyes, Feather
+  -- Dance, Howl, Shelter -- national_dex's effectModeled = true). That is
+  -- NOT the same as working: the native effect writes the ENGINE's own
+  -- stage table, and computeModernDamage reads ONLY modern_combat's store
+  -- (its own rawStat/stagesFor header), so on Gen 2 a native Growl-style
+  -- drop never reached the modern damage formula. Repointing them here is
+  -- the real fix, not redundancy; it also closes Feather Dance's Gen-1
+  -- dead record (gen1EffectModeled = false).
+  --
+  -- FIVE HAVE A REAL SECOND MECHANIC beyond the flat boosts, handled by
+  -- their own bespoke record below rather than primary(): Fillet Away and
+  -- Belly Drum cost HP, Captivate is gender-gated, Gear Up / Magnetic
+  -- Flux only reach Plus/Minus holders, Tidy Up also clears hazards and
+  -- Substitutes, Geomancy charges for a turn, and Curse is two moves in
+  -- one body (a self boost or a curse, by the user's own type).
+  ------------------------------------------------------------------
+
+  -- The raw mon behind whichever generation's battler this is (Gen 1
+  -- hands a wrapper, Gen 2 the mon itself -- the convention modern_hazards
+  -- .lua's own monOf documents).
+  local function monOf(who) return who and (who.mon or who) or nil end
+
+  local function emitMsg(battle, text)
+    if battle and battle.emit then battle:emit({ kind = "message", text = text }) end
+  end
+
+  local function failMsg(battle) emitMsg(battle, Strings("But it failed!")) end
+
+  local function nameOf(battle, who)
+    if battle and battle.monName then
+      local ok, nm = pcall(battle.monName, battle, who)
+      if ok and nm then return nm end
+    end
+    local m = monOf(who)
+    return (m and m.name) or "?"
+  end
+
+  -- The CURRENT stage of one stat, read from whichever store actually
+  -- holds it: modern_combat's atk/def/spa/spd bucket, or native speed
+  -- (Gen 2 battle.stages[side].speed, Gen 1 mon.stages.speed). Used only
+  -- to tell a real change from a capped no-op, which changeStage's
+  -- message array cannot (it returns "won't rise anymore" either way).
+  local function stageValue(battle, who, stat, gen2)
+    if stat == "speed" or stat == "accuracy" or stat == "evasion" then
+      if gen2 then
+        local side = battle.sideOf and battle:sideOf(who)
+        local bucket = side and battle.stages and battle.stages[side]
+        return (bucket and bucket[stat]) or 0
+      end
+      local m = monOf(who)
+      return (m and m.stages and m.stages[stat]) or 0
+    end
+    local s = mod.exports.stagesFor and mod.exports.stagesFor(battle, who) or {}
+    return s[stat] or 0
+  end
+
+  -- Apply a set of changes to ONE recipient, emitting every message and
+  -- reporting whether any stage actually moved. `changes` entries use the
+  -- same {self=, stat=, delta=, native=} shape applyChange already takes;
+  -- user/target are both pointed at `who` so direction is carried only by
+  -- `self` (a Plus/Minus ally is a "self" recipient for our purposes).
+  local function runChanges(n, who, changes)
+    local nn = { battle = n.battle, user = who, target = who, gen2 = n.gen2 }
+    local moved = false
+    for _, ch in ipairs(changes) do
+      local before = stageValue(n.battle, who, ch.stat, n.gen2)
+      for _, msg in ipairs(applyChange(nn, ch) or {}) do emitMsg(n.battle, msg) end
+      if stageValue(n.battle, who, ch.stat, n.gen2) ~= before then moved = true end
+    end
+    return moved
+  end
+
+  -- Flat, guaranteed self boosts. Every one is Showdown's `boosts` map on
+  -- a Status move; the citation beside each move is its block in moves.ts.
+  primary("GMAX_QUIVERDANCE_EFFECT", { -- moves.ts:14539-14543
+    { self = true, stat = "spa", delta = 1 }, { self = true, stat = "spd", delta = 1 },
+    { self = true, stat = "speed", delta = 1, native = true },
+  })
+  primary("GMAX_VICTORYDANCE_EFFECT", { -- moves.ts:20382-20386
+    { self = true, stat = "attack", delta = 1 }, { self = true, stat = "defense", delta = 1 },
+    { self = true, stat = "speed", delta = 1, native = true },
+  })
+  primary("GMAX_TAILGLOW_EFFECT", { { self = true, stat = "spa", delta = 3 } }) -- moves.ts:18832
+  primary("GMAX_WORKUP_EFFECT", { -- moves.ts:21039-21042
+    { self = true, stat = "attack", delta = 1 }, { self = true, stat = "spa", delta = 1 },
+  })
+  -- Autotomize's real second half (halving the user's weight, moves.ts:898-
+  -- 902) is NOT modelled: this engine tracks no weight stat in the modern
+  -- damage path (Heavy Slam / Low Kick read none either). Honest partial.
+  primary("GMAX_AUTOTOMIZE_EFFECT", { { self = true, stat = "speed", delta = 2, native = true } }) -- moves.ts:894-896
+  primary("GMAX_DEFENDORDER_EFFECT", { -- moves.ts:3413-3416
+    { self = true, stat = "defense", delta = 1 }, { self = true, stat = "spd", delta = 1 },
+  })
+  primary("GMAX_SHELTER_EFFECT", { { self = true, stat = "defense", delta = 2 } }) -- moves.ts:16320
+  -- Howl targets user-and-allies (moves.ts:9016) -- in singles that is the
+  -- user alone, so a self +1 Atk is the whole real effect.
+  primary("GMAX_HOWL_EFFECT", { { self = true, stat = "attack", delta = 1 } })
+  -- Target-directed drops. primary() sets accuracyChecked for these (a
+  -- self buff must not roll against the foe's evasion); applyChange's
+  -- fromEnemy rule makes them Mist/Substitute/ability-gated.
+  primary("GMAX_TICKLE_EFFECT", { { stat = "attack", delta = -1 }, { stat = "defense", delta = -1 } }) -- moves.ts:19614-19617
+  primary("GMAX_FEATHERDANCE_EFFECT", { { stat = "attack", delta = -2 } }) -- moves.ts:5163
+  primary("GMAX_BABYDOLLEYES_EFFECT", { { stat = "attack", delta = -1 } }) -- moves.ts:958-960
+
+  ------------------------------------------------------------------
+  -- Captivate -- SpA -2, but only against an OPPOSITE known gender;
+  -- same gender or either genderless fails (moves.ts:2189-2191, the
+  -- real onTryImmunity; the engine's mon.gender is the full lowercase
+  -- "male"/"female"/"unknown").
+  ------------------------------------------------------------------
+  mod.content.move_effects:register("GMAX_CAPTIVATE_EFFECT", {
+    kind = "primary",
+    accuracyChecked = true,
+    run = function(a, b, c)
+      local n = normalize(a, b, c)
+      local u, t = monOf(n.user), monOf(n.target)
+      local ug, tg = u and u.gender, t and t.gender
+      local function known(g) return g == "male" or g == "female" end
+      if not (known(ug) and known(tg) and ug ~= tg) then failMsg(n.battle); return end
+      for _, msg in ipairs(applyChange(n, { stat = "spa", delta = -2 }) or {}) do
+        emitMsg(n.battle, msg)
+      end
+    end,
+  })
+
+  ------------------------------------------------------------------
+  -- Fillet Away -- Atk/SpA/Spe +2 each, then pay half max HP. Fails if
+  -- the user is at or below half HP or has 1 max HP (moves.ts:5281-5285);
+  -- Showdown boosts FIRST and returns null without paying when no boost
+  -- landed, so the HP cost is gated on `moved` here too.
+  ------------------------------------------------------------------
+  mod.content.move_effects:register("GMAX_FILLETAWAY_EFFECT", {
+    kind = "primary",
+    run = function(a, b, c)
+      local n = normalize(a, b, c)
+      local m = monOf(n.user)
+      local maxHp = m and (m.maxHp or (m.stats and m.stats.hp))
+      if not (m and maxHp and maxHp > 1 and (m.hp or 0) > math.floor(maxHp / 2)) then
+        failMsg(n.battle); return
+      end
+      local moved = runChanges(n, n.user, {
+        { self = true, stat = "attack", delta = 2 },
+        { self = true, stat = "spa", delta = 2 },
+        { self = true, stat = "speed", delta = 2, native = true },
+      })
+      if not moved then failMsg(n.battle); return end
+      local cost = math.max(1, math.floor(maxHp / 2))
+      m.hp = math.max(0, (m.hp or 0) - cost)
+      if n.battle.emit then
+        n.battle:emit({ kind = "damage", side = n.battle:sideOf(n.user), amount = cost, hp = m.hp, anim = false })
+      end
+      emitMsg(n.battle, Strings("%s cut its own HP to power up!", nameOf(n.battle, n.user)))
+    end,
+  })
+
+  ------------------------------------------------------------------
+  -- Belly Drum -- fail when HP is at/below half, max HP is 1 (Shedinja
+  -- clause), or Attack is already maxed; else pay half max HP and set
+  -- Attack to +6 (moves.ts:1224-1227, a +12 boost clamped by the same
+  -- changeStage the cart's own cap uses).
+  ------------------------------------------------------------------
+  mod.content.move_effects:register("GMAX_BELLYDRUM_EFFECT", {
+    kind = "primary",
+    run = function(a, b, c)
+      local n = normalize(a, b, c)
+      local m = monOf(n.user)
+      local maxHp = m and (m.maxHp or (m.stats and m.stats.hp))
+      local atk = stageValue(n.battle, n.user, "attack", n.gen2)
+      if not (m and maxHp and maxHp > 1 and (m.hp or 0) > math.floor(maxHp / 2) and atk < 6) then
+        failMsg(n.battle); return
+      end
+      local cost = math.max(1, math.floor(maxHp / 2))
+      m.hp = math.max(0, (m.hp or 0) - cost)
+      if n.battle.emit then
+        n.battle:emit({ kind = "damage", side = n.battle:sideOf(n.user), amount = cost, hp = m.hp, anim = false })
+      end
+      for _, msg in ipairs(changeStage(n.battle, n.user, "attack", 12, false, n.gen2) or {}) do
+        emitMsg(n.battle, msg)
+      end
+      emitMsg(n.battle, Strings("%s cut its HP and maximized its Attack!", nameOf(n.battle, n.user)))
+    end,
+  })
+
+  ------------------------------------------------------------------
+  -- Curse -- two moves in one body (moves.ts:3277-3303). A non-Ghost
+  -- user trades a Spe stage for Atk +1 / Def +1 (refused only when BOTH
+  -- raises are capped); a Ghost user pays half its max HP -- the cut can
+  -- faint it -- to set the `cursed` volatile on the target. The volatile
+  -- rides the same mon.volatile bucket the engine's own tickSeedAndCurse
+  -- residual reads (tickSeedAndCurse is Gen 2 only; the Gen 1 residual
+  -- has no curse arm -- a documented, pre-existing engine limit).
+  ------------------------------------------------------------------
+  mod.content.move_effects:register("GMAX_CURSE_EFFECT", {
+    kind = "primary",
+    run = function(a, b, c)
+      local n = normalize(a, b, c)
+      local user = n.user
+      local ghost = false
+      local curTypesOf = mod.exports.curTypesOf
+      for _, t in ipairs(curTypesOf and curTypesOf(user, n.gen2) or {}) do
+        if t == "GHOST" then ghost = true end
+      end
+      if not ghost then
+        local atk = stageValue(n.battle, user, "attack", n.gen2)
+        local def = stageValue(n.battle, user, "defense", n.gen2)
+        if atk >= 6 and def >= 6 then failMsg(n.battle); return end
+        runChanges(n, user, {
+          { self = true, stat = "speed", delta = -1, native = true },
+          { self = true, stat = "attack", delta = 1 },
+          { self = true, stat = "defense", delta = 1 },
+        })
+        return
+      end
+      local target = n.target
+      local tm = monOf(target)
+      local um = monOf(user)
+      if not (tm and um) then failMsg(n.battle); return end
+      tm.volatile = tm.volatile or {}
+      local vol = tm.volatile
+      if tm.vanished or (tm.substitute or 0) > 0 or (tm.substituteHP or 0) > 0 or vol.cursed then
+        failMsg(n.battle); return
+      end
+      vol.cursed = true
+      local maxHp = um.maxHp or (um.stats and um.stats.hp) or 1
+      local cost = math.max(1, math.floor(maxHp / 2))
+      um.hp = math.max(0, (um.hp or 0) - cost)
+      if n.battle.emit then
+        n.battle:emit({ kind = "damage", side = n.battle:sideOf(user), amount = cost, hp = um.hp, anim = false })
+      end
+      emitMsg(n.battle, Strings("%s cut its own HP and put a CURSE on %s!",
+        nameOf(n.battle, user), nameOf(n.battle, target)))
+    end,
+  })
+
+  ------------------------------------------------------------------
+  -- Tidy Up -- remove every Substitute on the field and both sides'
+  -- hazards, then Atk +1 / Spe +1 to the user; succeeds if ANY of those
+  -- happened (moves.ts:19629-19650). Native Spikes lives in battle.spikes
+  -- [side] (a 0-3 count, modern_hazards.lua's own upgrade); the four
+  -- mod-owned hazards live in battle.hazards[side].
+  ------------------------------------------------------------------
+  mod.content.move_effects:register("GMAX_TIDYUP_EFFECT", {
+    kind = "primary",
+    run = function(a, b, c)
+      local n = normalize(a, b, c)
+      local battle = n.battle
+      local did = false
+      local all = (mod.exports.allActiveBattlers and mod.exports.allActiveBattlers(battle))
+        or { battle.player, battle.enemy }
+      for _, who in ipairs(all) do
+        local m = monOf(who)
+        if m then
+          if (m.substitute or 0) > 0 then m.substitute = nil; did = true end
+          if (m.substituteHP or 0) > 0 then m.substituteHP = nil; did = true end
+        end
+      end
+      for _, side in ipairs({ "player", "enemy" }) do
+        if mod.exports.hazardsFor then
+          local h = mod.exports.hazardsFor(battle, side)
+          if h.stealthRock or h.toxicSpikes > 0 or h.sharpSteel or h.stickyWeb then
+            h.stealthRock, h.toxicSpikes, h.sharpSteel, h.stickyWeb = false, 0, false, false
+            did = true
+          end
+        end
+        if battle.spikes and (battle.spikes[side] or 0) > 0 then
+          battle.spikes[side] = 0
+          did = true
+        end
+      end
+      local moved = runChanges(n, n.user, {
+        { self = true, stat = "attack", delta = 1 },
+        { self = true, stat = "speed", delta = 1, native = true },
+      })
+      if not (did or moved) then failMsg(n.battle) end
+    end,
+  })
+
+  ------------------------------------------------------------------
+  -- Gear Up / Magnetic Flux -- +1 Atk/+1 SpA and +1 Def/+1 SpD to every
+  -- Plus/Minus holder on the user's side (moves.ts:6484-6497 / :10831-
+  -- 10845). In singles the user is the only candidate, so it lands on
+  -- itself when it holds Plus or Minus and fails otherwise.
+  ------------------------------------------------------------------
+  local function sideBoostMove(effectId, changes)
+    mod.content.move_effects:register(effectId, {
+      kind = "primary",
+      run = function(a, b, c)
+        local n = normalize(a, b, c)
+        local battle = n.battle
+        local abilityIdOf = mod.exports.abilityIdOf
+        local side = battle.sideOf and battle:sideOf(n.user)
+        local all = (mod.exports.allActiveBattlers and mod.exports.allActiveBattlers(battle))
+          or { n.user }
+        local any = false
+        for _, who in ipairs(all) do
+          local sameSide = (not side) or (not battle.sideOf) or (battle:sideOf(who) == side)
+          local id = sameSide and abilityIdOf and abilityIdOf(who)
+          if id == "PLUS" or id == "MINUS" then
+            if runChanges(n, who, changes) then any = true end
+          end
+        end
+        if not any then failMsg(n.battle) end
+      end,
+    })
+  end
+  sideBoostMove("GMAX_GEARUP_EFFECT", {
+    { self = true, stat = "attack", delta = 1 }, { self = true, stat = "spa", delta = 1 },
+  })
+  sideBoostMove("GMAX_MAGNETICFLUX_EFFECT", {
+    { self = true, stat = "defense", delta = 1 }, { self = true, stat = "spd", delta = 1 },
+  })
+
+  ------------------------------------------------------------------
+  -- Geomancy -- a real two-turn charge, then SpA/SpD/Spe +2 each
+  -- (moves.ts:6543-6552). The charge rides the generic `charge` seam
+  -- (the same one Solar Beam uses): turn one announces and flips to the
+  -- release turn via BattleState's own charge branch, turn two runs the
+  -- boosts. The Gen 2 charge table is the one the native dispatch reads.
+  ------------------------------------------------------------------
+  mod.content.move_effects:register("GMAX_GEOMANCY_EFFECT", {
+    kind = "primary",
+    charge = { anim = "XSTATITEM_ANIM", enemyAnim = "XSTATITEM_DUPLICATE_ANIM" },
+    run = function(a, b, c)
+      local n = normalize(a, b, c)
+      runChanges(n, n.user, {
+        { self = true, stat = "spa", delta = 2 },
+        { self = true, stat = "spd", delta = 2 },
+        { self = true, stat = "speed", delta = 2, native = true },
+      })
+    end,
+  })
+  pcall(function()
+    require("src.battle.gen2.Effects").CHARGE.GMAX_GEOMANCY_EFFECT = { text = "%s is absorbing power!" }
+  end)
+
   mod.log:info("galar_gmax_dex: modern_movepool_stages loaded")
 end

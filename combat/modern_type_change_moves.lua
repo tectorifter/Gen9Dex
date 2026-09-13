@@ -28,7 +28,8 @@
 -- Gen 2's own damage path entirely, SUBEFFECTS.md's own documented
 -- gotcha).
 return function(mod)
-  local Battle = require("src.battle.gen2.Battle")
+  local gen2Ok_Battle, Battle = pcall(require, "src.battle.gen2.Battle")
+  Battle = gen2Ok_Battle and Battle or nil
   local curTypesOf = mod.exports.curTypesOf
   local setMonTypes = mod.exports.setMonTypes
   local canChangeType = mod.exports.canChangeType
@@ -188,20 +189,22 @@ return function(mod)
     mod.content.moves:patch(id, { effect = "G9_TYPESTRIP_" .. id })
   end
 
-  local nativeUseMove = Battle.useMove
-  function Battle:useMove(attacker, defender, moveId)
-    local requiredType = SELF_TYPE_STRIP[moveId]
-    if requiredType then
-      local has = false
-      for _, t in ipairs(curTypesOf(attacker, true)) do
-        if t == requiredType then has = true break end
+  if Battle then
+    local nativeUseMove = Battle.useMove
+    function Battle:useMove(attacker, defender, moveId)
+      local requiredType = SELF_TYPE_STRIP[moveId]
+      if requiredType then
+        local has = false
+        for _, t in ipairs(curTypesOf(attacker, true)) do
+          if t == requiredType then has = true break end
+        end
+        if not has then
+          self:emit({ kind = "message", text = "But it failed!" })
+          return
+        end
       end
-      if not has then
-        self:emit({ kind = "message", text = "But it failed!" })
-        return
-      end
+      return nativeUseMove(self, attacker, defender, moveId)
     end
-    return nativeUseMove(self, attacker, defender, moveId)
   end
 
   mod.events:on("battle.damage_dealt", function(ev)
@@ -244,5 +247,5 @@ return function(mod)
   mod.content.move_effects:register("G9_CONVERSION2_STUB", { kind = "full" })
   mod.content.moves:patch("CONVERSION2", { effect = "G9_CONVERSION2_STUB" })
 
-  mod.log:info("g9-battle-engine-beta: modern_type_change_moves installed (SOAK, MAGICPOWDER, CONVERSION, REFLECTTYPE, CAMOUFLAGE, BURNUP, DOUBLESHOCK; CONVERSION2 stubbed)")
+  mod.log:info("g9-battle-engine: modern_type_change_moves installed (SOAK, MAGICPOWDER, CONVERSION, REFLECTTYPE, CAMOUFLAGE, BURNUP, DOUBLESHOCK; CONVERSION2 stubbed)")
 end

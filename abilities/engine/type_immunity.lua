@@ -54,17 +54,16 @@ return function(mod, data)
     if not (target and move and move.type) then return next(ctx) end
     local id = abilityIdOf(target)
     if not (id and data[id]) then return next(ctx) end
-    -- Mold Breaker/Teravolt/Turboblaze (Phase 8, other bucket): ignore
-    -- an ability that would block a move's effect -- scoped here to the
-    -- real type-immunity family specifically (this file's own real,
-    -- clearest case: a Ground move now hits a Levitate/Water Absorb/Sap
-    -- Sipper/etc. holder), not Showdown's own full, broader ignore-list
-    -- (which also covers several other immunity/prevention families) --
-    -- a real, honestly-narrower scope given the time this would take to
-    -- replicate exhaustively across every immunity site in this mod, not
-    -- a silently-incomplete claim.
-    local ignoreAbility = ctx.user and abilityIdOf(ctx.user)
-    if ignoreAbility == "MOLDBREAKER" or ignoreAbility == "TERAVOLT" or ignoreAbility == "TURBOBLAZE" then
+    -- Mold Breaker/Teravolt/Turboblaze (Phase 8, other bucket; Phase 11
+    -- shared primitive): ignore an ability that would block a move's
+    -- effect -- scoped to the real type-immunity family specifically
+    -- (this file's own real, clearest case: a Ground move now hits a
+    -- Levitate/Water Absorb/Sap Sipper/etc. holder). Uses
+    -- combat/modern_combat.lua's one shared predicate every immunity
+    -- site now consults; see abilities/data/mold_breaker.lua for the
+    -- real, honestly-narrower-than-Showdown scope this covers.
+    if mod.exports.attackerIgnoresDefenderAbility
+        and mod.exports.attackerIgnoresDefenderAbility(ctx.user) then
       return next(ctx)
     end
     local record = abilityBehaviorOf(target)
@@ -99,7 +98,13 @@ return function(mod, data)
       local maxHp = mon.stats and mon.stats.hp
       if maxHp and (mon.hp or 0) < maxHp then
         local amount = math.max(1, math.floor(maxHp * healFraction))
-        mon.hp = math.min(maxHp, (mon.hp or 0) + amount)
+        -- Heal Block / boss "healblock": absorb abilities heal, so gated.
+        local tryHeal = mod.exports.g9TryHeal
+        if tryHeal then
+          tryHeal(ctx.battle, target, amount)
+        else
+          mon.hp = math.min(maxHp, (mon.hp or 0) + amount)
+        end
       end
     elseif statEffect and STAT_KEY[statEffect.stat] then
       -- fromEnemy=false: a stat RAISE from being hit is never Mist-gated
@@ -113,5 +118,5 @@ return function(mod, data)
     return 0, { crit = false, typeMult = 0 }
   end, 40)
 
-  mod.log:info("g9-battle-engine-beta: type_immunity installed (5 abilities: DRYSKIN, SAPSIPPER, WATERABSORB, VOLTABSORB, WELLBAKEDBODY)")
+  mod.log:info("g9-battle-engine: type_immunity installed (5 abilities: DRYSKIN, SAPSIPPER, WATERABSORB, VOLTABSORB, WELLBAKEDBODY)")
 end

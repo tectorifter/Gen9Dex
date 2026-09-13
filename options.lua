@@ -1,4 +1,4 @@
--- Mod Manager option schema for g9-battle-engine-beta (combat-only fork:
+-- Mod Manager option schema for g9-battle-engine (combat-only fork:
 -- see main.lua's own header for what this fork does and doesn't own).
 --
 -- Declared in manifest.json's "options_schema" field, same as Wilds of
@@ -25,7 +25,7 @@
 -- Keys/types/choices/defaults are unchanged from their original
 -- definitions, so every existing mod.options:get(...) read elsewhere in
 -- this mod keeps working exactly as before.
--- [g9-battle-engine-beta] gmax_custom_art, animated_battle_sprites,
+-- [g9-battle-engine] gmax_custom_art, animated_battle_sprites,
 -- wild_spawns_enabled, use_base_area_tables, classic_encounters,
 -- wild_max_per_map, follower_enabled, wild_contact_radius, and
 -- national_dex_sprites removed -- all sprite/spawn/overworld/follower
@@ -34,60 +34,51 @@
 -- gimmicks and vanilla_enhanced_layout removed too (2026-08-20): both
 -- custom battle scenes (Gen 1 overlay + Gen 2 full screen) that these
 -- controlled are deleted outright, not just uncalled -- see main.lua's
--- own header. gigantamax_size/gigantamax_skip_animation stay, now LIVE
--- again (round 12): battle_forms owns Dynamax activation + mechanics end
--- to end (including Gen 2's size-up via its own gen2dynamaxgrow.lua), but
--- Gen 1's draw-time scaling seam is the flagship's -- gigantamax/
--- dynamax_battle.lua (the consume-only processor, see main.lua) reads
--- these two options for the Gen 1 size-up it wraps around battle_forms'
--- dynamax_applied/reverted trigger. gimmick_dynamax.lua (the full parallel
--- Dynamax engine with its own HP doubling) stays on disk, canonical-
--- disabled -- booting it next to battle_forms would double-count.
+-- own header.
+-- Round 104 (2026-09-10) removed five more rows, each with its code:
+--   gen2_wide_layout (GEN 2 MOVE TYPE READOUT)  -- combat/gen2_wide_scene.lua deleted.
+--   custom_menu_scene (CUSTOM MENU SCREENS)     -- ui/custom_menu_takeover.lua and
+--                                                  ui/custom_party_scene.lua deleted.
+--   gigantamax_size (GIGANTAMAX SIZE)           -- Gen 1 draw-time size-up removed from
+--   gigantamax_skip_animation (SKIP GIGANTAMAX     gigantamax/dynamax_battle.lua (battle_forms
+--     GROW/SHRINK)                                 owns Dynamax sizing on both generations).
+--   bf_tera_dev (BATTLE FORMS TERA DEV)         -- gigantamax/tera_state.lua now forces
+--                                                  battle_forms' TERA TYPE option to AUTO
+--                                                  unconditionally; the dev escape hatch is gone.
+-- gigantamax/dynamax_battle.lua stays -- its Dynamax Level drive and
+-- max_move_subeffects.lua are unaffected by the size-up removal.
+-- Round 105 (2026-09-16) renamed two rows and gave one of them a real
+-- body:
+--   show_hp_lost_messages -> damage_numbers  (label SHOW HP LOST MESSAGES
+--     -> DAMAGE NUMBERS). No longer a placeholder: ON makes the battle
+--     scene float each Pokemon's HP change over its own HP bar -- a red
+--     "-N" for damage taken, a green "+N" for HP recovered -- each one
+--     living one second then fading to invisible. main.lua exports
+--     mod.exports.damageNumbersEnabled() (which reads this key) so
+--     g9-Battle-Scene gates on the SAME option the Mod Manager shows;
+--     the scene derives the two values itself from the HP vector the
+--     engine already stamps on every emitted event (event.g9SceneHp),
+--     so no per-hit amount plumbing is needed and the numbers are
+--     correct for every HP change either generation emits.
+--     Works on both generations.
+--   dev_tools -> adv_stats (label DEV TOOLS -> ADV.STATS; the party-
+--     submenu entry and its in-screen titles read "Adv.Stats" now too).
+--     stats/dev_stats_screen.lua is unchanged except that on a Gen 1
+--     boot its window is 20% larger in both axes (160x144 -> 192x173)
+--     with its layout scaled to match.
 return {
-  -- Not yet consulted anywhere -- explicit user request to leave this
-  -- placeholder in place for a future pass that prints "X lost Y HP!"
-  -- style messages using our own computed damage number (both gens).
-  -- modern_combat.lua's damage formula itself is no longer toggleable
-  -- (see that file's own header) -- this option is unrelated to that.
+  -- Damage Numbers (round 105, renamed from show_hp_lost_messages).
+  -- Read by main.lua's mod.exports.damageNumbersEnabled(), which the
+  -- battle scene consults before floating a number. The scene computes
+  -- the delta from the per-event HP vector the engine stamps
+  -- (event.g9SceneHp), so this option only has to say ON/OFF.
   {
-    key = "show_hp_lost_messages",
-    label = "SHOW HP LOST MESSAGES",
+    key = "damage_numbers",
+    label = "DAMAGE NUMBERS",
     type = "choice",
     default = "false",
     choices = { { "ON", "true" }, { "OFF", "false" } },
-    description = "Not yet implemented. Reserved for a future \"X lost Y HP!\" battle message using this mod's own computed damage number.",
-  },
-  {
-    key = "gen2_wide_layout",
-    label = "GEN 2 MOVE TYPE READOUT",
-    type = "choice",
-    default = "false",
-    choices = { { "ON", "true" }, { "OFF", "false" } },
-    description = "Gen 2 only. Gen 2's real move-select screen has no equivalent to Gen 1's WIDE layout -- it's a single fixed 160x144 panel with no engine-level wider-canvas mechanism, confirmed against source. This adds the highlighted move's TYPE on the move box's own unused bottom row (native only fills 4 of the box's 6 rows during move select) -- the one piece of info Gen 2's native list doesn't show at all, without touching or resizing anything native draws.",
-  },
-  {
-    key = "custom_menu_scene",
-    label = "CUSTOM MENU SCREENS",
-    type = "choice",
-    default = "false",
-    choices = { { "ON", "true" }, { "OFF", "false" } },
-    description = "Replaces native menu screens with GalarGmaxDex's own GUI. Covers: party overview + moves/relearn/IV-EV screens, the title screen menu, the in-game start menu (with a MOD MENUS hub for other mods' rows), the options menu, and the mod manager. Battle switch prompts and TM/HM teach mode still render natively; bag and Pokedex are not covered yet. OFF (default): menus are fully vanilla.",
-  },
-  {
-    key = "gigantamax_size",
-    label = "GIGANTAMAX SIZE",
-    type = "choice",
-    default = "1.4",
-    choices = { { "x1.2", "1.2" }, { "x1.4", "1.4" }, { "x1.8", "1.8" }, { "x2.2", "2.2" }, { "x2.6", "2.6" } },
-    description = "How much bigger the player's mon's battle sprite draws while Dynamaxed (Gen 1 only; battle_forms grows Gen 2 itself), on top of its normal resting size. Read by gigantamax/dynamax_battle.lua.",
-  },
-  {
-    key = "gigantamax_skip_animation",
-    label = "SKIP GIGANTAMAX GROW/SHRINK",
-    type = "choice",
-    default = "false",
-    choices = { { "ON", "true" }, { "OFF", "false" } },
-    description = "ON: Dynamax's size-up and size-down happen instantly (0 seconds, no staged ramp/pause) instead of the eased animation -- Gen 1 only, read by gigantamax/dynamax_battle.lua (Gen 2 is battle_forms' own gen2dynamaxgrow.lua). OFF (default): the full animated sequence plays.",
+    description = "ON: the battle scene floats each Pokemon's HP change over its own HP bar as it happens -- a red \"-N\" for damage taken and a green \"+N\" for HP recovered -- each fading out over one second. Works on both generations. OFF (default): no floating numbers.",
   },
   {
     key = "gym_badge_buff",
@@ -98,19 +89,11 @@ return {
     description = "ON (default): owning certain badges boosts the player's WHOLE side's stats/move-type damage (real Gold/Silver mechanic, now correctly applied to every player-side battler in a doubles/triples fight, not just the lead -- native Gen 2 only ever checked the single primary battler). OFF: no badge stat/type boost for anyone.",
   },
   {
-    key = "dev_tools",
-    label = "DEV TOOLS",
+    key = "adv_stats",
+    label = "ADV.STATS",
     type = "choice",
     default = "false",
     choices = { { "ON", "true" }, { "OFF", "false" } },
-    description = "ON: adds a DEVSTATS entry to the party submenu (selected Pokemon) showing its ability/nature/Tera type/Dynamax level/Gigantamax Factor, real combat stats, and full EV/IV distribution across 3 pages. OFF (default): party submenu is unchanged.",
-  },
-  {
-    key = "bf_tera_dev",
-    label = "BATTLE FORMS TERA DEV",
-    type = "choice",
-    default = "false",
-    choices = { { "ON", "true" }, { "OFF", "false" } },
-    description = "OFF (default): this mod owns Tera entirely. battle_forms' own TERA TYPE manager choice is forced to AUTO and its DVs-derived fallback is never reached (every battler is pre-stamped with this mod's stored per-Pokemon Tera Type), so battle_forms only reports WHEN Terastallization triggers -- it never decides WHAT type deploys. ON: battle_forms' original dev/test tool is re-enabled -- its TERA TYPE choice overrides every Pokemon (and overrides per-Pokemon stored types, so the stats row may differ from what deploys while this is ON). Only turn it on to deliberately pin a matchup for testing.",
+    description = "ON: adds an Adv.Stats entry to the party submenu (selected Pokemon) showing its ability/nature/Tera type/Dynamax level/Gigantamax Factor, real combat stats, and full EV/IV distribution across 3 pages (the Gen 1 window is 20% larger). OFF (default): party submenu is unchanged.",
   },
 }

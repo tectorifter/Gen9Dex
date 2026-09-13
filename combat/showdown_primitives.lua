@@ -14,7 +14,7 @@
 -- #cureStatus/#trySetStatus/#addVolatile/#removeVolatile/#boostBy/#faint
 -- and Battle#randomChance.
 --
--- SCOPE: only meant to be consulted while g9-battle-engine-beta's own Gen
+-- SCOPE: only meant to be consulted while g9-battle-engine's own Gen
 -- 9 combat-mode toggle is on for a given battle -- native Gen2 combat
 -- (gen2/Battle.lua's own useMove/dealDamage/accuracyRoll/applyStatus/
 -- changeStage) stays the real, unmodified fallback path when it's off.
@@ -245,5 +245,5 @@ return function(mod)
   end
 
   mod.exports.ShowdownPrimitives = Primitives
-  mod.log:info("g9-battle-engine-beta: showdown_primitives installed (Gen 9 toggle-mode verb set: damage/heal/faint/status/volatile/boost/chance)")
+  mod.log:info("g9-battle-engine: showdown_primitives installed (Gen 9 toggle-mode verb set: damage/heal/faint/status/volatile/boost/chance)")
 end

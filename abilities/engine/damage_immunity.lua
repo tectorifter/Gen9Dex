@@ -21,11 +21,12 @@ return function(mod, data)
   ------------------------------------------------------------------
   registerPostEffectivenessModifier("wonderguard", 0, function(ctx)
     if abilityIdOf(ctx.target) ~= "WONDERGUARD" then return 1.0 end
-    -- Mold Breaker/Teravolt/Turboblaze (Phase 8, other bucket) -- see
-    -- abilities/engine/type_immunity.lua's own header for the real,
-    -- honestly-scoped ignore-list this covers.
-    local ignoreAbility = ctx.user and abilityIdOf(ctx.user)
-    if ignoreAbility == "MOLDBREAKER" or ignoreAbility == "TERAVOLT" or ignoreAbility == "TURBOBLAZE" then
+    -- Mold Breaker/Teravolt/Turboblaze (Phase 8, other bucket; Phase 11
+    -- shared primitive) -- combat/modern_combat.lua's one shared
+    -- predicate, the same one abilities/engine/type_immunity.lua's own
+    -- type-immunity family consults.
+    if mod.exports.attackerIgnoresDefenderAbility
+        and mod.exports.attackerIgnoresDefenderAbility(ctx.user) then
       return 1.0
     end
     -- Real, confirmed bug fixed 2026-08-28 (Wonder-Guard-reachability
@@ -86,7 +87,13 @@ return function(mod, data)
     local wantFlag = id and FLAG_IMMUNITY[id]
     if wantFlag then
       local flags = moveFlags(move.id)
-      if flags and flags[wantFlag] then
+      -- Mold Breaker/Teravolt/Turboblaze (Phase 11): Bulletproof/
+      -- Soundproof/Wind Rider are all `breakable` in Showdown, so a
+      -- Mold Breaker attacker's move ignores them -- the same shared
+      -- predicate type_immunity.lua/Wonder Guard use above.
+      local ignored = mod.exports.attackerIgnoresDefenderAbility
+        and mod.exports.attackerIgnoresDefenderAbility(user)
+      if flags and flags[wantFlag] and not ignored then
         return 0, { crit = false, typeMult = 0 }
       end
     end
@@ -218,7 +225,11 @@ return function(mod, data)
   -- plain halve of the returned number, no correction needed.
   ------------------------------------------------------------------
   local Status = require("src.battle.Status")
-  local Battle = require("src.battle.gen2.Battle")
+  -- Gen 2's own STATUSES table is needed only for the two Gen-2 residual
+  -- patches below; a Gen 1 game refuses src.battle.gen2.Battle outright
+  -- (crossGenerationDenial), so the require is guarded and every Gen-2-only
+  -- patch below is skipped rather than failing this whole ability file.
+  local gen2ok, Battle = pcall(require, "src.battle.gen2.Battle")
 
   -- Heatproof is burn-specific (confirmed real, its own effect never
   -- mentions poison) -- no poison-residual wrap needed for it at all,
@@ -239,6 +250,7 @@ return function(mod, data)
   end
 
   local function patchGen2BurnResidual()
+    if not (gen2ok and type(Battle) == "table") then return end
     local record = Battle.STATUSES.burn
     if not record then return end
     local native = record.residual
@@ -265,6 +277,7 @@ return function(mod, data)
     return magicGuardBrn(battler, opponent, battle)
   end
   local function magicGuardGen2(statusKey)
+    if not (gen2ok and type(Battle) == "table") then return end
     local record = Battle.STATUSES[statusKey]
     if not record then return end
     local native = record.residual
@@ -315,17 +328,66 @@ return function(mod, data)
     return abilityIdOf(mon) == "MAGICGUARD"
   end
 
-  -- Gen 2's own sand-chip half -- real, confirmed, PRE-EXISTING gap
-  -- (already flagged in this file's own header before today), NOT
-  -- fixed this pass either: `Gen2Effects.sandstormDamage(maxHp)`
-  -- (combat/modern_weather.lua's own patch) takes ONLY the max-HP
-  -- number, no mon identity at all -- confirmed by direct read of its
-  -- own real native call site, `Battle:tickWeather` (gen2/Battle.lua),
-  -- which DOES know the mon but is a large function this mod
-  -- deliberately reuses wholesale rather than replacing (that file's
-  -- own header: "the mechanism... is reused as-is"). Fixing this
-  -- correctly means replacing that whole function, not a smaller patch
-  -- -- a real, separate, still-open gap, same honest status as before.
+  -- Gen 2's own sand-chip half (Phase 11). Magic Guard -- and, matching
+  -- the Gen 1 path in combat/modern_weather.lua, the real Sand Force/
+  -- Sand Rush/Sand Veil/Overcoat family -- block weather chip damage.
+  -- The old note here called this unfixable without replacing
+  -- Battle:tickWeather because Effects.sandstormDamage(maxHp) carries no
+  -- mon identity; this IS that replacement, faithfully reproducing the
+  -- native function (gen2/Battle.lua:5066-5097 -- duration decrement,
+  -- expiry, per-turn text, the sand pass with its vanished skip and its
+  -- damage/animation events) and adding exactly ONE gate: skip the chip
+  -- for a mon whose ability is in SAND_CHIP_IMMUNE_ABILITY. The fraction
+  -- still comes from Gen2Effects.sandstormDamage, so
+  -- combat/modern_weather.lua's own 1/8 -> 1/16 patch (installed later
+  -- in the boot, but read lazily here at call time) still applies.
+  local Strings = require("src.core.Strings")
+  local gen2EffectsOk, Gen2Effects = pcall(require, "src.battle.gen2.Effects")
+  Gen2Effects = gen2EffectsOk and Gen2Effects or {}
+  local SAND_CHIP_IMMUNE_ABILITY = {
+    SANDFORCE = true, SANDRUSH = true, SANDVEIL = true, MAGICGUARD = true,
+    OVERCOAT = true,
+  }
+  local nativeTickWeather = Battle and Battle.tickWeather
+  if not (gen2ok and type(Battle) == "table" and type(nativeTickWeather) == "function") then
+    nativeTickWeather = nil
+  end
+  if nativeTickWeather then
+  function Battle:tickWeather()
+    -- Every non-sand weather path is delegated straight to the engine's
+    -- own untouched function -- only the sand case this gate exists for
+    -- is reproduced below.
+    if self.weather ~= "sandstorm" then return nativeTickWeather(self) end
+    self.weatherTurns = self.weatherTurns - 1
+    if self.weatherTurns <= 0 then
+      self:emit({ kind = "weather", weather = nil,
+        text = Strings(Gen2Effects.WEATHER_END_TEXT[self.weather]) })
+      self.weather = nil
+      return
+    end
+    self:emit({ kind = "message",
+      text = Strings(Gen2Effects.WEATHER_TURN_TEXT[self.weather]) })
+    for _, mon in ipairs({ self.player, self.enemy }) do
+      if (mon.hp or 0) > 0 and not self:volatile(mon).vanished then
+        local def = self:speciesDef(mon)
+        local types = (def and def.types) or mon.types
+        if Gen2Effects.sandstormHits(types)
+            and not SAND_CHIP_IMMUNE_ABILITY[abilityIdOf(mon)] then
+          local maxHp = mon.maxHp or (mon.stats and mon.stats.hp) or 8
+          local damage = Gen2Effects.sandstormDamage(maxHp)
+          mon.hp = math.max(0, mon.hp - damage)
+          self:emit({ kind = "message",
+            text = Strings("%s is buffeted by the sandstorm!",
+              self:monName(mon)) })
+          -- .SandstormDamage plays ANIM_IN_SANDSTORM between two
+          -- SwitchTurnCore calls, so it runs from the OTHER side.
+          self:emit({ kind = "damage", side = self:sideOf(mon),
+            amount = damage, hp = mon.hp, anim = "ANIM_IN_SANDSTORM" })
+        end
+      end
+    end
+  end
+  end
 
-  mod.log:info("g9-battle-engine-beta: damage_immunity installed (STURDY, WONDERGUARD, BULLETPROOF, SOUNDPROOF, WINDRIDER, TELEPATHY, MAGICGUARD, HEATPROOF; SANDFORCE/SANDRUSH/SANDVEIL sand-chip half wired in combat/modern_weather.lua)")
+  mod.log:info("g9-battle-engine: damage_immunity installed (STURDY, WONDERGUARD, BULLETPROOF, SOUNDPROOF, WINDRIDER, TELEPATHY, MAGICGUARD, HEATPROOF; MAGICGUARD/SANDFORCE/SANDRUSH/SANDVEIL/OVERCOAT Gen 2 sand-chip gate via Battle:tickWeather)")
 end

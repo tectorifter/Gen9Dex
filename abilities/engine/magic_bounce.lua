@@ -66,22 +66,25 @@ return function(mod, data)
   -- insurance) can't cross-contaminate each other's guard state.
   local bounced = setmetatable({}, { __mode = "k" })
 
-  local Battle = require("src.battle.gen2.Battle")
-  local nativeUseMoveBounce = Battle.useMove
-  function Battle:useMove(attacker, defender, moveId)
-    local guard = bounced[self]
-    if defender and attacker and defender ~= attacker and not (guard and guard[moveId])
-        and bounceable(self, moveId, attacker, defender, true) then
-      self:emit({ kind = "message",
-        text = displayNameFor(self, defender, true) .. " bounced the move back!" })
-      bounced[self] = guard or {}
-      bounced[self][moveId] = true
-      local ok, err = pcall(nativeUseMoveBounce, self, defender, attacker, moveId)
-      bounced[self][moveId] = nil
-      if not ok then mod.log:warn("g9-battle-engine-beta: magic_bounce redirect failed: %s", tostring(err)) end
-      return
+  local gen2BattleOk, Battle = pcall(require, "src.battle.gen2.Battle")
+  Battle = gen2BattleOk and Battle or nil
+  if Battle then
+    local nativeUseMoveBounce = Battle.useMove
+    function Battle:useMove(attacker, defender, moveId)
+      local guard = bounced[self]
+      if defender and attacker and defender ~= attacker and not (guard and guard[moveId])
+          and bounceable(self, moveId, attacker, defender, true) then
+        self:emit({ kind = "message",
+          text = displayNameFor(self, defender, true) .. " bounced the move back!" })
+        bounced[self] = guard or {}
+        bounced[self][moveId] = true
+        local ok, err = pcall(nativeUseMoveBounce, self, defender, attacker, moveId)
+        bounced[self][moveId] = nil
+        if not ok then mod.log:warn("g9-battle-engine: magic_bounce redirect failed: %s", tostring(err)) end
+        return
+      end
+      return nativeUseMoveBounce(self, attacker, defender, moveId)
     end
-    return nativeUseMoveBounce(self, attacker, defender, moveId)
   end
 
   local BattleState = require("src.battle.BattleState")
@@ -97,11 +100,11 @@ return function(mod, data)
       boundGen1[self][moveId] = true
       local ok, err = pcall(nativePerformMoveBounce, self, target, user, moveInst, isCalled)
       boundGen1[self][moveId] = nil
-      if not ok then mod.log:warn("g9-battle-engine-beta: magic_bounce redirect failed: %s", tostring(err)) end
+      if not ok then mod.log:warn("g9-battle-engine: magic_bounce redirect failed: %s", tostring(err)) end
       return
     end
     return nativePerformMoveBounce(self, user, target, moveInst, isCalled)
   end
 
-  mod.log:info("g9-battle-engine-beta: magic_bounce installed (MAGICBOUNCE)")
+  mod.log:info("g9-battle-engine: magic_bounce installed (MAGICBOUNCE)")
 end

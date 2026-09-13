@@ -58,7 +58,8 @@
 -- express "replace the type multiplier" rather than "add another factor
 -- on top of it" -- see that file's own header comment at the call site.
 return function(mod, data)
-  local Battle = require("src.battle.gen2.Battle")
+  local gen2Ok_Battle, Battle = pcall(require, "src.battle.gen2.Battle")
+  Battle = gen2Ok_Battle and Battle or nil
   local setWeather = mod.exports.setWeather
   local currentWeather = mod.exports.currentWeather
   local canSetWeather = mod.exports.canSetWeather
@@ -150,20 +151,22 @@ return function(mod, data)
   -- Move-fail gate: Desolate Land / Primordial Sea block the OTHER
   -- element's damaging moves outright while active.
   ------------------------------------------------------------------
-  local nativeUseMove = Battle.useMove
-  function Battle:useMove(attacker, defender, moveId)
-    if self.weatherPrimal and defender then
-      local blockedType = BLOCKS_TYPE[currentWeather(self, true)]
-      if blockedType then
-        local def = self:moveDef(moveId)
-        if def and def.type == blockedType and (def.power or 0) > 0 then
-          self:emit({ kind = "message",
-            text = self:monName(attacker) .. "'s move failed against the weather!" })
-          return
+  if Battle then
+    local nativeUseMove = Battle.useMove
+    function Battle:useMove(attacker, defender, moveId)
+      if self.weatherPrimal and defender then
+        local blockedType = BLOCKS_TYPE[currentWeather(self, true)]
+        if blockedType then
+          local def = self:moveDef(moveId)
+          if def and def.type == blockedType and (def.power or 0) > 0 then
+            self:emit({ kind = "message",
+              text = self:monName(attacker) .. "'s move failed against the weather!" })
+            return
+          end
         end
       end
+      return nativeUseMove(self, attacker, defender, moveId)
     end
-    return nativeUseMove(self, attacker, defender, moveId)
   end
 
   ------------------------------------------------------------------
@@ -182,5 +185,5 @@ return function(mod, data)
     return nil
   end
 
-  mod.log:info("g9-battle-engine-beta: switchin_primal_weather ability engine installed (DESOLATELAND, PRIMORDIALSEA, DELTASTREAM)")
+  mod.log:info("g9-battle-engine: switchin_primal_weather ability engine installed (DESOLATELAND, PRIMORDIALSEA, DELTASTREAM)")
 end

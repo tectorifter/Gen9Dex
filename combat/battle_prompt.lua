@@ -81,20 +81,19 @@ return function(mod)
   local GameVersion = require("src.core.GameVersion")
   local isGen2Boot = GameVersion.generation(GameVersion.get()) == 2
 
-  -- Same pcall-require + warn-only-on-a-gen-2-boot shape combat/
-  -- gen2_wide_scene.lua:43-55 uses: a Gen 1 boot legitimately has neither of
-  -- these and must not log a scary line about it.
+  -- pcall-require + warn-only-on-a-gen-2-boot: a Gen 1 boot legitimately has
+  -- neither of these and must not log a scary line about it.
   local chromeOk, Chrome = pcall(require, "src.ui.gen2.Chrome")
   Chrome = chromeOk and Chrome or nil
   if not chromeOk and isGen2Boot then
-    mod.log:warn("g9-battle-engine-beta: battle_prompt: src.ui.gen2.Chrome not available on a gen 2 boot: %s",
+    mod.log:warn("g9-battle-engine: battle_prompt: src.ui.gen2.Chrome not available on a gen 2 boot: %s",
       tostring(Chrome))
   end
 
   local gen2Ok, Gen2BattleState = pcall(require, "src.ui.gen2.BattleState")
   Gen2BattleState = (gen2Ok and type(Gen2BattleState) == "table") and Gen2BattleState or nil
   if not Gen2BattleState and isGen2Boot then
-    mod.log:warn("g9-battle-engine-beta: battle_prompt: src.ui.gen2.BattleState not available on a gen 2 boot: %s",
+    mod.log:warn("g9-battle-engine: battle_prompt: src.ui.gen2.BattleState not available on a gen 2 boot: %s",
       tostring(Gen2BattleState))
   end
 
@@ -261,7 +260,7 @@ return function(mod)
     restore(screen, ask)
     local ok, err = pcall(ask.onAnswer, index, screen, ask.request)
     if not ok then
-      mod.log:warn("g9-battle-engine-beta: battle_prompt: %s onAnswer(%d) errored: %s",
+      mod.log:warn("g9-battle-engine: battle_prompt: %s onAnswer(%d) errored: %s",
         tostring(ask.id), index, tostring(err))
     end
   end
@@ -319,7 +318,7 @@ return function(mod)
         -- answer handlers (:2366, :2370, :2522, :2998, :3033) uses exactly
         -- this pair to hand control back to the queue.
         if ask == nil then
-          mod.log:warn("g9-battle-engine-beta: battle_prompt: recovered a stranded prompt phase")
+          mod.log:warn("g9-battle-engine: battle_prompt: recovered a stranded prompt phase")
           self.phase = "resolving"
           self.messageTimer = 0
           self.messagePages = nil
@@ -335,7 +334,7 @@ return function(mod)
         -- honest choice to fall back to, since B is what a player who
         -- refuses to engage with the box presses.
         if not input then
-          mod.log:warn("g9-battle-engine-beta: battle_prompt: %s answered %d, no input device",
+          mod.log:warn("g9-battle-engine: battle_prompt: %s answered %d, no input device",
             tostring(ask.id), ask.cancel or ask.index)
           answer(self, ask.cancel or ask.index)
           return
@@ -376,7 +375,7 @@ return function(mod)
       -- owns the screen now, and re-raising over it would be this file
       -- doing to another mod what the engine's hardcoded list did to us.
       if self.__g9Prompt ~= nil then
-        mod.log:warn("g9-battle-engine-beta: battle_prompt: %s dropped, phase moved to %s",
+        mod.log:warn("g9-battle-engine: battle_prompt: %s dropped, phase moved to %s",
           tostring(self.__g9Prompt.id), tostring(self.phase))
         self.__g9Prompt = nil
       end
@@ -398,7 +397,7 @@ return function(mod)
           -- "CATCH it" fired at a battle that is already over is worse
           -- than silence. battleChoiceActive is how a caller checks.
           self.__g9PromptPending = nil
-          mod.log:warn("g9-battle-engine-beta: battle_prompt: %s dropped, battle ended first",
+          mod.log:warn("g9-battle-engine: battle_prompt: %s dropped, battle ended first",
             tostring(pending.id))
         elseif INTERRUPTIBLE[self.phase] and not screenBusy(self) then
           self.__g9PromptPending = nil
@@ -416,7 +415,8 @@ return function(mod)
   end
 
   -- ------------------------------------------------------------------
-  -- Draw: battle.overlay, for the reason gen2_wide_scene.lua:31-37 gives.
+  -- Draw: battle.overlay (the per-frame overlay hook, fired inside the
+  -- active transform and after the scene body).
   -- ------------------------------------------------------------------
   -- :drawScene fires battle.overlay unconditionally every frame (src/ui/
   -- gen2/BattleState.lua:3884-3885), already inside whichever transform is
@@ -459,7 +459,7 @@ return function(mod)
       love.graphics.setColor(1, 1, 1, 1)
     end)
     if not ok then
-      mod.log:warn("g9-battle-engine-beta: battle_prompt: box draw errored: %s", tostring(err))
+      mod.log:warn("g9-battle-engine: battle_prompt: box draw errored: %s", tostring(err))
     end
   end)
 
@@ -581,5 +581,5 @@ return function(mod)
     return true
   end
 
-  mod.log:info("g9-battle-engine-beta: battle_prompt installed (askBattleChoice, battleChoiceActive, cancelBattleChoice)")
+  mod.log:info("g9-battle-engine: battle_prompt installed (askBattleChoice, battleChoiceActive, cancelBattleChoice)")
 end

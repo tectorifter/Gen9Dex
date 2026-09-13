@@ -19,14 +19,17 @@ return function(mod, data)
     return info ~= nil and info.damageClass == "status" and info.target == "selected-pokemon"
   end
 
-  local Battle = require("src.battle.gen2.Battle")
-  local nativeUseMoveGoodAsGold = Battle.useMove
-  function Battle:useMove(attacker, defender, moveId)
-    if defender and defender ~= attacker and blocksMove(defender, moveId) then
-      self:emit({ kind = "message", text = "But, it failed!" })
-      return
+  local gen2BattleOk, Battle = pcall(require, "src.battle.gen2.Battle")
+  Battle = gen2BattleOk and Battle or nil
+  if Battle then
+    local nativeUseMoveGoodAsGold = Battle.useMove
+    function Battle:useMove(attacker, defender, moveId)
+      if defender and defender ~= attacker and blocksMove(defender, moveId) then
+        self:emit({ kind = "message", text = "But, it failed!" })
+        return
+      end
+      return nativeUseMoveGoodAsGold(self, attacker, defender, moveId)
     end
-    return nativeUseMoveGoodAsGold(self, attacker, defender, moveId)
   end
 
   local BattleState = require("src.battle.BattleState")
@@ -39,5 +42,5 @@ return function(mod, data)
     return nativePerformMoveGoodAsGold(self, user, target, moveInst, isCalled)
   end
 
-  mod.log:info("g9-battle-engine-beta: good_as_gold installed (GOODASGOLD)")
+  mod.log:info("g9-battle-engine: good_as_gold installed (GOODASGOLD)")
 end

@@ -3,15 +3,16 @@
 -- Explicit user scope (2026-08-20, restated 2026-09-07): battle_forms owns
 -- Dynamax/Gigantamax activation and mechanics end to end -- WHEN a Pokemon
 -- Dynamaxes, its 3-turn clock, its Max Move substitution (BATTLE_FORMS_*
--- ids), its damage-volume half (hpscale.lua), its Max Guard, and its Gen 2
--- size-up (gen2dynamaxgrow.lua). This mod does NOT decide when a gimmick
--- activates and does NOT provide its own gimmick activation. It READS the
--- activation trigger battle_forms already emits -- mod.battle_forms's own
--- `dynamax_applied` / `dynamax_reverted` events (src/formapi.lua,
--- fired from src/dynamax.lua's own apply/teardown) -- and CONSUMES it to
--- process the Dynamax combat properties battle_forms deliberately leaves
--- open, exactly the same consume-only relationship tera_state.lua already
--- has with `tera_applied`:
+-- ids), its damage-volume half (hpscale.lua), its Max Guard, and its sprite
+-- sizing on BOTH generations (gen2dynamaxgrow.lua on Gen 2; the Gen 1
+-- draw-time seam was this mod's until round 104 removed it -- see below).
+-- This mod does NOT decide when a gimmick activates and does NOT provide its
+-- own gimmick activation. It READS the activation trigger battle_forms
+-- already emits -- mod.battle_forms's own `dynamax_applied` /
+-- `dynamax_reverted` events (src/formapi.lua, fired from src/dynamax.lua's
+-- own apply/teardown) -- and CONSUMES it to process the Dynamax combat
+-- properties battle_forms deliberately leaves open, exactly the same
+-- consume-only relationship tera_state.lua already has with `tera_applied`:
 --
 --   1. Dynamax Level drive. battle_forms' damage-volume half is
 --      (30 + L) / 20 -- hpscale.lua reads L from the mon's
@@ -27,21 +28,7 @@
 --      player who never touched a Candy or a trainer definition behaves
 --      exactly as battle_forms ships.
 --
---   2. Gen 1 size-up. battle_forms only grows the player's pic on Gen 2
---      (its src/gen2dynamaxgrow.lua wraps src.ui.gen2.BattleState
---      :picScale); its own main.lua documents that Gen 1 has no draw-time
---      scaling seam on its side. Gen 1's seam is this mod's: wrapping
---      src.battle.BattleState:drawBattlerPic (the same confirmed real
---      render point gimmick_dynamax.lua's own wrap uses -- BattleState
---      .lua:4875, signature (battler, x, y, scale)) and scaling the
---      player's pic around its bottom-centre while the mon is Dynamaxed.
---      Driven from wall-clock elapsed at draw time (no update-loop
---      interception -- battle_forms owns the turn clock, so unlike
---      gimmick_dynamax we must never block turn resolution). Sizing is
---      animated per the existing gigantamax_size / gigantamax_skip_animation
---      options; Gen 2 is deliberately untouched (battle_forms owns it).
---
---   3. Max Move secondary effects. battle_forms registers every damaging
+--   2. Max Move secondary effects. battle_forms registers every damaging
 --      Max Move as NO_ADDITIONAL_EFFECT (its own deliberate scope -- the
 --      move data is generic across games and their gmaxmoves.lua has no
 --      per-move secondaries). The Showdown-verified secondaries for Max
@@ -54,6 +41,14 @@
 --      (90-150 / 70-100 Fighting+Poison / fixed-160 G-Max) stays
 --      battle_forms' -- this file never decides base power. maxguard
 --      (status) is battle_forms' own -- skipped.
+--
+-- Round 104 removed the Gen 1 draw-time size-up this file used to carry
+-- (the BattleState:drawBattlerPic wrap + its eased grow/shrink tween, plus
+-- the gigantamax_size / gigantamax_skip_animation options): battle_forms
+-- owns Dynamax sprite sizing on both generations now, so the Gen 1 seam was
+-- redundant. The only thing this file still stamps is the __g9Dynamaxed
+-- marker that combat/type_override_primitives.lua reads for its Dynamax
+-- type-change immunity.
 --
 -- Why gimmick_dynamax.lua stays DISABLED (canonical-disabled, not
 -- deleted): it is a full parallel Dynamax engine -- its own activation
@@ -74,16 +69,11 @@ return function(mod)
     return math.floor(n)
   end
 
-  -- Forward declarations for section 2's state: handleReverted (below)
-  -- needs sizeUp/now even though the full size-up machinery is defined
-  -- further down. Without these the names would resolve to nil globals.
-  local sizeUp, now
-
   -- ---------------------------------------------------------------------
-  -- 0. Trigger source: battle_forms' own events (pcall-guarded so the
-  --    consume side still comes up if battle_forms is absent -- a
-  --    dynamax_battle with no dynamax source just idles; the level/store
-  --    and size-up options remain safe no-ops).
+  -- Trigger source: battle_forms' own events (pcall-guarded so the
+  -- consume side still comes up if battle_forms is absent -- a
+  -- dynamax_battle with no dynamax source just idles; the level/store
+  -- reads remain safe no-ops).
   -- ---------------------------------------------------------------------
   local appliedEvent, revertedEvent = "mod.battle_forms.dynamax_applied", "mod.battle_forms.dynamax_reverted"
   local okBf, bf = pcall(function() return mod.find and mod.find("battle_forms") end)
@@ -99,9 +89,7 @@ return function(mod)
   -- ---------------------------------------------------------------------
   -- 1. Dynamax Level drive + Dynamaxed marker. Keyed on the mon itself
   --    (battle_forms' payload carries the LIVE mon, not a battle -- Gen 1
-  --    it is battle.player.mon, Gen 2 it is battle.player), so everything
-  --    downstream -- including the Gen 1 size-up wrap, which only ever
-  --    sees self.player.mon -- can key off the same identity.
+  --    it is battle.player.mon, Gen 2 it is battle.player).
   -- ---------------------------------------------------------------------
   local function handleApplied(ev)
     local mon = ev and ev.mon
@@ -132,124 +120,15 @@ return function(mod)
     local mon = ev and ev.mon
     if not mon then return end
     mon.__g9Dynamaxed = nil
-    local st = sizeUp[mon]
-    if st and not st.shrinking then
-      st.shrinking = true
-      st.t0 = now()
-    end
   end
 
   -- ---------------------------------------------------------------------
-  -- 2. Gen 1 size-up. BattleState:drawBattlerPic is the one place the
-  --    engine already renders the player's battle pic through a normal
-  --    draw call -- wrapping it preserves the battle's palette, clipping,
-  --    and every existing pic effect (same rationale + math as
-  --    gimmick_dynamax.lua's own wrap). The factor is derived from
-  --    wall-clock elapsed at draw time, so the animation advances with
-  --    zero interference in the turn flow (battle_forms owns that).
-  -- ---------------------------------------------------------------------
-  local SIZE_LEVELS = { 1.2, 1.4, 1.8, 2.2, 2.6 }
-  local DEFAULT_SIZE = 1.4
-  local SEQUENCE_DURATION = 0.6
-
-  now = function()
-    if love and love.timer and love.timer.getTime then
-      return love.timer.getTime()
-    end
-    return os.clock()
-  end
-
-  local function sizeOption()
-    local raw = mod.options and mod.options:get("gigantamax_size")
-    local n = tonumber(raw)
-    if n and n >= 1 and n <= 3 then
-      for _, lvl in ipairs(SIZE_LEVELS) do
-        if n <= lvl then return lvl end
-      end
-      return SIZE_LEVELS[#SIZE_LEVELS]
-    end
-    return DEFAULT_SIZE
-  end
-
-  local function skipAnimationOption()
-    return mod.options and mod.options:get("gigantamax_skip_animation") == "true"
-  end
-
-  local function growFractionAt(elapsed)
-    if elapsed <= 0 then return 0 end
-    if elapsed >= SEQUENCE_DURATION then return 1 end
-    local t = elapsed / SEQUENCE_DURATION
-    return t * t * (3 - 2 * t)
-  end
-
-  sizeUp = setmetatable({}, { __mode = "k" })
-
-  local function scaleAtTime(mon)
-    local st = sizeUp[mon]
-    if not st then return nil end
-    local skip = skipAnimationOption()
-    if skip then
-      if st.shrinking then
-        sizeUp[mon] = nil
-      end
-      return st.shrinking and nil or st.target
-    end
-    local elapsed = now() - st.t0
-    if st.shrinking then
-      local frac = growFractionAt(math.max(0, SEQUENCE_DURATION - elapsed))
-      local factor = 1 + (st.target - 1) * frac
-      if elapsed >= SEQUENCE_DURATION then
-        sizeUp[mon] = nil
-      end
-      return factor
-    end
-    local factor = 1 + (st.target - 1) * growFractionAt(elapsed)
-    if elapsed >= SEQUENCE_DURATION then
-      st.t0 = now()
-      st.settled = true
-    end
-    return factor
-  end
-
-  local okBS, BattleState = pcall(require, "src.battle.BattleState")
-  if okBS and BattleState and type(BattleState.drawBattlerPic) == "function"
-      and not BattleState.__g9DynamaxBattleWrapped then
-    BattleState.__g9DynamaxBattleWrapped = true
-    local vanillaDrawBattlerPic = BattleState.drawBattlerPic
-    function BattleState:drawBattlerPic(battler, x, y, scale)
-      local st = battler and battler.mon and sizeUp[battler.mon]
-      if st and battler == self.player and battler.sprite then
-        local factor = scaleAtTime(battler.mon)
-        if factor and factor ~= 1 then
-          local width = battler.sprite:getWidth() * scale
-          local height = battler.sprite:getHeight() * scale
-          local anchorX, anchorY = x + width / 2, y + height
-          love.graphics.push()
-          love.graphics.translate(anchorX, anchorY)
-          love.graphics.scale(factor, factor)
-          love.graphics.translate(-anchorX, -anchorY)
-          vanillaDrawBattlerPic(self, battler, x, y, scale)
-          love.graphics.pop()
-          return
-        end
-      end
-      return vanillaDrawBattlerPic(self, battler, x, y, scale)
-    end
-  end
-
-  -- ---------------------------------------------------------------------
-  -- Wiring: subscribe to the trigger, start the grow tween on apply,
-  -- shrink on revert, and defensively clear all markers on battle end
-  -- (battle_forms emits a revert itself on teardown, but a battle ending
-  -- mid-Dynamax should never leave a stale marker behind).
+  -- Wiring: subscribe to the trigger and defensively clear the marker on
+  -- battle end (battle_forms emits a revert itself on teardown, but a
+  -- battle ending mid-Dynamax should never leave a stale marker behind).
   -- ---------------------------------------------------------------------
   mod.events:on(appliedEvent, function(ev)
-    local mon = ev and ev.mon
-    if not mon then return end
-    local effective = handleApplied(ev)
-    if effective and not skipAnimationOption() then
-      sizeUp[mon] = { target = sizeOption(), t0 = now(), shrinking = false }
-    end
+    handleApplied(ev)
   end)
   mod.events:on(revertedEvent, function(ev)
     handleReverted(ev)
@@ -261,12 +140,11 @@ return function(mod)
       local mon = b and (b.mon or b)
       if mon then
         mon.__g9Dynamaxed = nil
-        sizeUp[mon] = nil
       end
     end
   end)
 
   mod.log:info("galar_gmax_dex: dynamax_battle installed (consumes battle_forms' "
-    .. "dynamax_applied/reverted -- Dynamax Level drive, Gen 1 size-up; Max Move secondaries now live in max_move_subeffects.lua)")
+    .. "dynamax_applied/reverted -- Dynamax Level drive; Max Move secondaries live in max_move_subeffects.lua)")
   return mod.exports
 end

@@ -80,11 +80,17 @@ return function(mod)
   -- above; these run on both Gen 1 and Gen 2 (normalize+displayNameFor
   -- bridge, same as modern_movepool_status.lua's primary handlers).
   ------------------------------------------------------------------
-  local function healFraction(who, numerator, denominator)
+  local function healFraction(battle, who, numerator, denominator)
     local mon = who.mon
     if mon.hp >= mon.stats.hp then return false end
     local amount = math.max(1, math.floor(mon.stats.hp * numerator / denominator))
-    mon.hp = math.min(mon.stats.hp, mon.hp + amount)
+    -- Heal Block / boss "healblock": the one gate every heal routes through.
+    local tryHeal = mod.exports.g9TryHeal
+    if tryHeal then
+      if tryHeal(battle, who, amount) <= 0 then return false end
+    else
+      mon.hp = math.min(mon.stats.hp, mon.hp + amount)
+    end
     return true
   end
 
@@ -100,7 +106,7 @@ return function(mod)
     accuracyChecked = true,
     run = function(a, b, c)
       local n = normalize(a, b, c)
-      if not healFraction(n.target, 1, 2) then
+      if not healFraction(n.battle, n.target, 1, 2) then
         return { romText(n.battle.data, "_ButItFailedText", "But, it failed!") }
       end
       return { Strings("%s's\nHP was restored!", displayNameFor(n.battle, n.target, n.gen2)) }
@@ -117,7 +123,7 @@ return function(mod)
     kind = "primary",
     run = function(a, b, c)
       local n = normalize(a, b, c)
-      if not healFraction(n.user, 1, 2) then
+      if not healFraction(n.battle, n.user, 1, 2) then
         return { romText(n.battle.data, "_ButItFailedText", "But, it failed!") }
       end
       return { Strings("%s's\nHP was restored!", displayNameFor(n.battle, n.user, n.gen2)) }
@@ -147,11 +153,11 @@ return function(mod)
     end
     local ok
     if weather == "SUN" then
-      ok = healFraction(n.user, 2, 3)
+      ok = healFraction(n.battle, n.user, 2, 3)
     elseif weather == "RAIN" or weather == "SAND" or weather == "SNOW" then
-      ok = healFraction(n.user, 1, 4)
+      ok = healFraction(n.battle, n.user, 1, 4)
     else
-      ok = healFraction(n.user, 1, 2)
+      ok = healFraction(n.battle, n.user, 1, 2)
     end
     if not ok then
       return { romText(n.battle.data, "_ButItFailedText", "But, it failed!") }
@@ -171,7 +177,7 @@ return function(mod)
       local n = normalize(a, b, c)
       local currentWeather = mod.exports.currentWeather
       local weather = currentWeather and currentWeather(n.battle, n.gen2)
-      local ok = (weather == "SAND") and healFraction(n.user, 2, 3) or healFraction(n.user, 1, 2)
+      local ok = (weather == "SAND") and healFraction(n.battle, n.user, 2, 3) or healFraction(n.battle, n.user, 1, 2)
       if not ok then
         return { romText(n.battle.data, "_ButItFailedText", "But, it failed!") }
       end
@@ -189,7 +195,7 @@ return function(mod)
     run = function(a, b, c)
       local n = normalize(a, b, c)
       local onGrassyTerrain = n.battle.terrain == "GRASSY"
-      local ok = onGrassyTerrain and healFraction(n.target, 2, 3) or healFraction(n.target, 1, 2)
+      local ok = onGrassyTerrain and healFraction(n.battle, n.target, 2, 3) or healFraction(n.battle, n.target, 1, 2)
       if not ok then
         return { romText(n.battle.data, "_ButItFailedText", "But, it failed!") }
       end
@@ -212,7 +218,7 @@ return function(mod)
       if not (cureStatusOf and cureStatusOf(n.target)) then
         return { romText(n.battle.data, "_ButItFailedText", "But, it failed!") }
       end
-      healFraction(n.user, 1, 2)
+      healFraction(n.battle, n.user, 1, 2)
       return { Strings("%s\nwas cured of its\nstatus condition!", displayNameFor(n.battle, n.target, n.gen2)) }
     end,
   })
@@ -227,7 +233,7 @@ return function(mod)
     run = function(a, b, c)
       local n = normalize(a, b, c)
       local cureStatusOf = mod.exports.cureStatusOf
-      healFraction(n.user, 1, 4)
+      healFraction(n.battle, n.user, 1, 4)
       if cureStatusOf then cureStatusOf(n.user) end
       return { Strings("%s\nwas blessed\nby the full moon!", displayNameFor(n.battle, n.user, n.gen2)) }
     end,
@@ -386,8 +392,11 @@ return function(mod)
   -- patched onto Bounce for Gen 1 (CUSTOM_EFFECT_PATCH, main.lua) --
   -- Gen 2's native system reads it off the identical live `.effect`
   -- field, no second patch needed.
-  local Gen2Effects = require("src.battle.gen2.Effects")
-  Gen2Effects.CHARGE.GALAR_BOUNCE_EFFECT = { text = "%s sprang up!", vanish = true }
+  local gen2Ok_Gen2Effects, Gen2Effects = pcall(require, "src.battle.gen2.Effects")
+  Gen2Effects = gen2Ok_Gen2Effects and Gen2Effects or nil
+  if Gen2Effects then
+    Gen2Effects.CHARGE.GALAR_BOUNCE_EFFECT = { text = "%s sprang up!", vanish = true }
+  end
 
   -- Bounce, Gen 2 release-turn paralyze (real 30% chance, same fraction
   -- the Gen 1 registration above already uses) -- gen2-only, Gen 1's own
@@ -469,16 +478,19 @@ return function(mod)
   -- the real, direct ownership mechanism: WE decide what executes, the
   -- native dispatch underneath just runs whatever moveId it's handed.
   do
-    local Battle2 = require("src.battle.gen2.Battle")
-    local nativeUseMoveRampage = Battle2.useMove
-    function Battle2:useMove(attacker, defender, moveId)
-      if attacker then
-        local vol = self:volatile(attacker)
-        if vol.rampageMoveId and vol.rampageMoveId ~= moveId then
-          moveId = vol.rampageMoveId
+    local gen2Ok_Battle2, Battle2 = pcall(require, "src.battle.gen2.Battle")
+    Battle2 = gen2Ok_Battle2 and Battle2 or nil
+    if Battle2 then
+      local nativeUseMoveRampage = Battle2.useMove
+      function Battle2:useMove(attacker, defender, moveId)
+        if attacker then
+          local vol = self:volatile(attacker)
+          if vol.rampageMoveId and vol.rampageMoveId ~= moveId then
+            moveId = vol.rampageMoveId
+          end
         end
+        return nativeUseMoveRampage(self, attacker, defender, moveId)
       end
-      return nativeUseMoveRampage(self, attacker, defender, moveId)
     end
   end
   -- Uproar's own real extra effect (both engines): wakes every active
@@ -512,7 +524,7 @@ return function(mod)
     kind = "full",
     charge = { anim = "XSTATITEM_ANIM", enemyAnim = "XSTATITEM_DUPLICATE_ANIM" },
   })
-  require("src.battle.gen2.Effects").CHARGE.GALAR_ELECTROSHOT_EFFECT = { text = "%s absorbed electricity!" }
+  do local ok, E = pcall(require, "src.battle.gen2.Effects"); if ok and E then E.CHARGE.GALAR_ELECTROSHOT_EFFECT = { text = "%s absorbed electricity!" } end end
 
   local BattleState = require("src.battle.BattleState")
   local nativePerformMove = BattleState.performMove

@@ -51,8 +51,7 @@ return function(mod)
   end
 
   -- Recomputes a Gen 1 recipient's stats after granting EV yield, preserving
-  -- current damage instead of resetting to full -- same pattern already
-  -- proven in custom_party_scene.lua's IvEvEditor:changeValue. mon.stats.hp
+  -- current damage instead of resetting to full. mon.stats.hp
   -- IS this mon's max HP in Gen 1 (no separate maxHp field), so none is set.
   local function recomputeGen1(game, mon)
     local def = ModernStats.resolveBase(mon.species, game.data.pokemon[mon.species], nationalDexExports())

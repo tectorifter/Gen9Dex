@@ -1,3 +1,10 @@
+-- Legacy item dispatcher. Superseded by the combat/modern_* item layer;
+-- kept only because combat/damage_pipeline.lua still requires and calls it.
+-- Phase 30 (item-effects plan) fixed its held-item read: it used to look at
+-- `mon.heldItem`, a field that does not exist anywhere in this engine -- a
+-- Gen 2 mon stores its item on `mon.item` (gen2/Mon.lua:296). It stayed
+-- inert either way because items/data/items_battle.lua is a no-op stub, but
+-- the wrong field would have silently ignored any future data entry.
 return function(mod)
     local items_battle = require("items/data/items_battle")
 
@@ -10,11 +17,8 @@ return function(mod)
 
         for _, target in ipairs(targets) do
             local mon = target.mon
-            if not mon or not mon.heldItem then
-                -- Lua 5.1/LuaJIT does not have 'goto' for loop skipping in this context
-                -- and 'continue' is not a keyword. We use a simple if-check.
-            else
-                local item_id = mon.heldItem
+            if mon and mon.item then
+                local item_id = mon.item
                 local effect = items_battle[item_id]
 
                 if effect then

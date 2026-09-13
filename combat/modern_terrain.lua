@@ -28,7 +28,8 @@
 -- every real terrain rule exempts a semi-invulnerable target/attacker, not
 -- guessed at here.
 return function(mod)
-  local Battle = require("src.battle.gen2.Battle")
+  local gen2Ok_Battle, Battle = pcall(require, "src.battle.gen2.Battle")
+  Battle = gen2Ok_Battle and Battle or nil
   local curTypesOf = mod.exports.curTypesOf
   local registerDamageModifier = mod.exports.registerDamageModifier
   local resolveFieldDuration = mod.exports.resolveFieldDuration
@@ -39,6 +40,11 @@ return function(mod)
     "modern_terrain: combat/field_duration.lua must load first")
 
   local function isGrounded(mon)
+    -- Phase 8 Gravity (combat/modern_field_effects.lua): a grounded field
+    -- makes every active mon count as grounded for terrain purposes too.
+    if mon and (mon.gravityGrounded or (mon.mon and mon.mon.gravityGrounded)) then
+      return true
+    end
     for _, t in ipairs(curTypesOf(mon, true)) do
       if t == "FLYING" then return false end
     end
@@ -160,9 +166,18 @@ return function(mod)
           local maxHp = mon.maxHp or (mon.stats and mon.stats.hp) or mon.hp
           if mon.hp < maxHp then
             local healed = math.max(1, math.floor(maxHp / 16))
-            mon.hp = math.min(maxHp, mon.hp + healed)
-            battle:emit({ kind = "message",
-              text = battle:monName(mon) .. "'s HP was restored by the Grassy Terrain!" })
+            local tryHeal = mod.exports.g9TryHeal
+            local restored
+            if tryHeal then
+              restored = tryHeal(battle, mon, healed)
+            else
+              mon.hp = math.min(maxHp, mon.hp + healed)
+              restored = healed
+            end
+            if restored > 0 then
+              battle:emit({ kind = "message",
+                text = battle:monName(mon) .. "'s HP was restored by the Grassy Terrain!" })
+            end
           end
         end
       end
@@ -188,74 +203,78 @@ return function(mod)
   --
   -- Wraps Battle:applyStatus/Battle:applyConfusion -- the real, dotted,
   -- class-level entry points every native and mod status/confusion source
-  -- funnels through (confirmed, gen2/Battle.lua:2978/3026) -- EXCEPT this
-  -- mod's own GALAR_CONFUSE_EFFECT_<chance> family (main.lua's
-  -- installMovepoolEffects), which writes battle:volatile(target).
-  -- confuseCount directly rather than calling applyConfusion. A real,
-  -- known gap: Misty Terrain does not block confusion from THAT specific
-  -- path today. Not silently passed off as complete.
+  -- funnels through (confirmed, gen2/Battle.lua:2978/3026). The old
+  -- caveat that this mod's own generic confusion secondary (main.lua's
+  -- installMovepoolEffects) wrote battle:volatile(target).confuseCount
+  -- directly -- and so slipped past this wrap -- is CLOSED (plan phase
+  -- 12): main.lua now routes both that branch and Poison Puppeteer's own
+  -- confusion through Battle:applyConfusion, keeping the direct write only
+  -- as a fallback for a minimal battle stub with no applyConfusion method.
   ------------------------------------------------------------------
-  local nativeApplyStatus = Battle.applyStatus
-  function Battle:applyStatus(mon, status, source)
-    if self.terrain == "ELECTRIC" and status == "slp" and affectedByTerrain(self, mon) then
-      self:emit({ kind = "message", text = "The Electric Terrain prevents sleep!" })
-      return false
-    end
-    if self.terrain == "MISTY" and affectedByTerrain(self, mon) then
-      self:emit({ kind = "message", text = "The Misty Terrain protects against status!" })
-      return false
-    end
-    return nativeApplyStatus(self, mon, status, source)
-  end
-
-  local nativeApplyConfusion = Battle.applyConfusion
-  function Battle:applyConfusion(mon, turns, source)
-    if self.terrain == "MISTY" and affectedByTerrain(self, mon) then
-      self:emit({ kind = "message", text = "The Misty Terrain protects against confusion!" })
-      return false
-    end
-    return nativeApplyConfusion(self, mon, turns, source)
-  end
-
-  ------------------------------------------------------------------
-  -- Psychic Terrain: a grounded, non-semi-invulnerable target can't be
-  -- hit by a positive-priority move used against it (self-targeted moves
-  -- are never blocked -- irrelevant in this singles-only engine anyway,
-  -- since attacker and defender are never the same battler here).
-  --
-  -- Known simplification: real Showdown still spends the move's PP and
-  -- announces it (onTryHit nullifies only the move's own effect, the same
-  -- "doesn't affect" shape modern_combat_protect.lua's Part D reuses for
-  -- Protect). This wrap instead skips the native call entirely on a
-  -- block -- no PP cost, no "used MOVE!" line -- a real, simpler behavior
-  -- than the exact PS rule, not silently passed off as identical.
-  ------------------------------------------------------------------
-  local nativeUseMove = Battle.useMove
-  function Battle:useMove(attacker, defender, moveId)
-    if self.terrain == "PSYCHIC" and defender and defender ~= attacker then
-      -- caster-aware since Phase 5 (abilities/engine/priority_change.lua):
-      -- real Psychic Terrain also blocks a Prankster-boosted status move,
-      -- which only reads as priority > 0 once movePriority knows WHO is
-      -- using it -- without attacker here this would silently miss that
-      -- real interaction (the move's own base priority is 0).
-      local priority = self:movePriority(moveId, attacker)
-      if priority and priority > 0 and affectedByTerrain(self, defender) then
-        self:emit({ kind = "message",
-          text = self:monName(defender) .. " surrounds itself with psychic terrain!" })
-        return
+  if Battle then
+    local nativeApplyStatus = Battle.applyStatus
+    function Battle:applyStatus(mon, status, source)
+      if self.terrain == "ELECTRIC" and status == "slp" and affectedByTerrain(self, mon) then
+        self:emit({ kind = "message", text = "The Electric Terrain prevents sleep!" })
+        return false
       end
+      if self.terrain == "MISTY" and affectedByTerrain(self, mon) then
+        self:emit({ kind = "message", text = "The Misty Terrain protects against status!" })
+        return false
+      end
+      return nativeApplyStatus(self, mon, status, source)
     end
-    return nativeUseMove(self, attacker, defender, moveId)
+
+    local nativeApplyConfusion = Battle.applyConfusion
+    function Battle:applyConfusion(mon, turns, source)
+      if self.terrain == "MISTY" and affectedByTerrain(self, mon) then
+        self:emit({ kind = "message", text = "The Misty Terrain protects against confusion!" })
+        return false
+      end
+      return nativeApplyConfusion(self, mon, turns, source)
+    end
+
+    ------------------------------------------------------------------
+    -- Psychic Terrain: a grounded, non-semi-invulnerable target can't be
+    -- hit by a positive-priority move used against it (self-targeted moves
+    -- are never blocked -- irrelevant in this singles-only engine anyway,
+    -- since attacker and defender are never the same battler here).
+    --
+    -- Known simplification: real Showdown still spends the move's PP and
+    -- announces it (onTryHit nullifies only the move's own effect, the same
+    -- "doesn't affect" shape modern_combat_protect.lua's Part D reuses for
+    -- Protect). This wrap instead skips the native call entirely on a
+    -- block -- no PP cost, no "used MOVE!" line -- a real, simpler behavior
+    -- than the exact PS rule, not silently passed off as identical.
+    ------------------------------------------------------------------
+    local nativeUseMove = Battle.useMove
+    function Battle:useMove(attacker, defender, moveId)
+      if self.terrain == "PSYCHIC" and defender and defender ~= attacker then
+        -- caster-aware since Phase 5 (abilities/engine/priority_change.lua):
+        -- real Psychic Terrain also blocks a Prankster-boosted status move,
+        -- which only reads as priority > 0 once movePriority knows WHO is
+        -- using it -- without attacker here this would silently miss that
+        -- real interaction (the move's own base priority is 0).
+        local priority = self:movePriority(moveId, attacker)
+        if priority and priority > 0 and affectedByTerrain(self, defender) then
+          self:emit({ kind = "message",
+            text = self:monName(defender) .. " surrounds itself with psychic terrain!" })
+          return
+        end
+      end
+      return nativeUseMove(self, attacker, defender, moveId)
+    end
   end
 
   ------------------------------------------------------------------
   -- Damage modifiers, one registerDamageModifier entry covering all four
   -- terrains (same "one entry, branch on the field state" shape modern_
-  -- combat.lua's own "weather" entry already uses for its four weathers).
-  -- Priority 105: below weather's own 110, above STAB's 100 -- terrain and
-  -- weather never gate on the same condition, so relative order between
-  -- them doesn't change the result, but this keeps every field-wide
-  -- modifier grouped above the per-hit ones by convention.
+  -- combat.lua's own old "weather" entry used before weather moved to its
+  -- real pre-crit inline stage -- see that file's weatherDamageMultiplier).
+  -- Priority 105: above STAB's 100 -- terrain and STAB never gate on the
+  -- same condition, so relative order between them doesn't change the
+  -- result, but this keeps every field-wide modifier grouped above the
+  -- per-hit ones by convention.
   --
   -- 5325/4096 (~1.3x) is real current Showdown's own terrain-boost
   -- fraction (confirmed directly, same chainModify literal on all three
@@ -290,5 +309,5 @@ return function(mod)
     return 1.0
   end)
 
-  mod.log:info("g9-battle-engine-beta: modern_terrain installed (Electric/Grassy/Misty/Psychic)")
+  mod.log:info("g9-battle-engine: modern_terrain installed (Electric/Grassy/Misty/Psychic)")
 end

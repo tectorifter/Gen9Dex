@@ -375,8 +375,12 @@ return function(mod)
   ------------------------------------------------------------------
   if Gen2Battle then
     local nativeCanAct = Gen2Battle.canAct
-    function Gen2Battle:canAct(mon)
-      if not nativeCanAct(self, mon) then return false end
+    -- moveId is forwarded, not dropped: CheckPlayerTurn/CheckEnemyTurn pass
+    -- it (gen2/Battle.lua:1057), the native sleep arm reads it for the
+    -- Snore/Sleep Talk bypass, and modern_move_flags.lua's own freeze/
+    -- cantusetwice wrap below this one needs it too.
+    function Gen2Battle:canAct(mon, moveId)
+      if not nativeCanAct(self, mon, moveId) then return false end
       local vol = self:volatile(mon)
       if vol.attract then
         local name = self:monName(mon)

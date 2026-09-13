@@ -32,7 +32,8 @@
 -- one, real, honest gap versus current Showdown (which keeps residual
 -- too), not silently passed off as exact.
 return function(mod)
-  local Battle = require("src.battle.gen2.Battle")
+  local gen2Ok_Battle, Battle = pcall(require, "src.battle.gen2.Battle")
+  Battle = gen2Ok_Battle and Battle or nil
 
   -- Generalizes Battle:switch (player-only, native, left completely
   -- untouched) to the enemy side too -- added as a brand-new method via
@@ -40,27 +41,29 @@ return function(mod)
   -- Mirrors Battle:switch's own real logic exactly (volatile clear on both
   -- the outgoing and incoming mon, fresh stages, the same "send"/battler_
   -- switched events, trap/Amulet Coin/Spikes on send-in).
-  function Battle:switchMonAtSide(side, index)
-    if side == "player" then return self:switch(index) end
-    local mon = self.enemyParty[index]
-    if not mon or (mon.hp or 0) <= 0 then return false end
-    if mon == self.enemy then return false end
-    local previous = self.enemy
-    self:clearVolatile(self.enemy)
-    self:clearVolatile(mon)
-    self.enemy = mon
-    self.enemyIndex = index
-    self.stages.enemy = Battle.newStages()
-    self:emit({ kind = "send", side = "enemy", mon = mon,
-      text = "Go! " .. self:monName(mon) .. "!" })
-    local Runtime = require("src.mods.Runtime")
-    Runtime.emit("battle.battler_switched", {
-      battle = self, side = self:sideRecord(mon), battler = mon,
-      previous = previous,
-    })
-    self:breakTrapsOnSend(mon)
-    self:spikesDamage(mon)
-    return true
+  if Battle then
+    function Battle:switchMonAtSide(side, index)
+      if side == "player" then return self:switch(index) end
+      local mon = self.enemyParty[index]
+      if not mon or (mon.hp or 0) <= 0 then return false end
+      if mon == self.enemy then return false end
+      local previous = self.enemy
+      self:clearVolatile(self.enemy)
+      self:clearVolatile(mon)
+      self.enemy = mon
+      self.enemyIndex = index
+      self.stages.enemy = Battle.newStages()
+      self:emit({ kind = "send", side = "enemy", mon = mon,
+        text = "Go! " .. self:monName(mon) .. "!" })
+      local Runtime = require("src.mods.Runtime")
+      Runtime.emit("battle.battler_switched", {
+        battle = self, side = self:sideRecord(mon), battler = mon,
+        previous = previous,
+      })
+      self:breakTrapsOnSend(mon)
+      self:spikesDamage(mon)
+      return true
+    end
   end
 
   -- The default bench pick for a self-switch on the enemy's own side:
@@ -85,10 +88,10 @@ return function(mod)
   -- is exactly one thing here to decide (which bench mon comes in), and
   -- "is a smarter chooser present at all" is the only question worth
   -- asking, per explicit user decision.
-  Battle.switchAiChooser = nil
+  if Battle then Battle.switchAiChooser = nil end
   function mod.exports.registerSwitchAiChooser(fn)
     assert(type(fn) == "function", "registerSwitchAiChooser: fn must be a function")
-    Battle.switchAiChooser = fn
+    if Battle then Battle.switchAiChooser = fn end
   end
 
   -- The one generic entrypoint every self-switch effect (a move today, an
@@ -122,7 +125,7 @@ return function(mod)
         end
       end
       if #bench == 0 then return false end
-      local chosen = Battle.switchAiChooser and Battle.switchAiChooser(battle, mon, bench)
+    local chosen = Battle and Battle.switchAiChooser and Battle.switchAiChooser(battle, mon, bench)
       chosen = chosen or firstAliveBenchIndex(battle.enemyParty, battle.enemyIndex)
       if not chosen then return false end
       return battle:switchMonAtSide("enemy", chosen)
@@ -139,5 +142,5 @@ return function(mod)
     return true
   end
 
-  mod.log:info("g9-battle-engine-beta: switch_primitives installed (requestSwitch, registerSwitchAiChooser)")
+  mod.log:info("g9-battle-engine: switch_primitives installed (requestSwitch, registerSwitchAiChooser)")
 end

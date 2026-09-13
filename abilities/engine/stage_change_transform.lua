@@ -19,7 +19,9 @@ return function(mod, data)
   local abilityIdOf = mod.exports.abilityIdOf
   assert(abilityIdOf, "stage_change_transform: ability_dispatch.lua must load first")
 
-  local Battle = require("src.battle.gen2.Battle")
+  local gen2BattleOk, Battle = pcall(require, "src.battle.gen2.Battle")
+  Battle = gen2BattleOk and Battle or nil
+  if Battle then
   function Battle:changeStageAgainstMist(attacker, target, stat, stages)
     if target ~= attacker and (stages or 0) < 0 and self:volatile(target).mist then
       self:emit({ kind = "message", text = self:monName(target) .. "'s protected by MIST." })
@@ -54,6 +56,7 @@ return function(mod, data)
     end
     return self:changeStage(target, stat, stages)
   end
+  end
 
-  mod.log:info("g9-battle-engine-beta: stage_change_transform installed (CONTRARY, SIMPLE speed/accuracy/evasion half)")
+  mod.log:info("g9-battle-engine: stage_change_transform installed (CONTRARY, SIMPLE speed/accuracy/evasion half)")
 end

@@ -42,5 +42,5 @@ return function(mod, data)
       text = battle:monName(target) .. " transformed into the " .. moveType .. " type!" })
   end)
 
-  mod.log:info("g9-battle-engine-beta: ondamage_type_change ability engine installed (COLORCHANGE)")
+  mod.log:info("g9-battle-engine: ondamage_type_change ability engine installed (COLORCHANGE)")
 end

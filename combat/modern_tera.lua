@@ -202,8 +202,8 @@ return function(mod)
   -- reports WHEN one triggers. Two sides to that here:
   --
   -- 1. ensureBattleFormsGate (gigantamax/tera_state.lua) forces battle_forms'
-  --    TERA TYPE dev option to AUTO unless bf_tera_dev is ON, so its dev
-  --    choice can never override our stored types. Re-ensured on every
+  --    TERA TYPE option to AUTO unconditionally, so its dev choice can never
+  --    override our stored types. Re-ensured on every
   --    battle.started and on the tera_applied event because battle_forms is
   --    an optional dependency that may boot before OR after us -- by the
   --    time a battle runs (or an activation event fires) it is certainly

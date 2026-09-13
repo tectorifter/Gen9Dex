@@ -1,5 +1,5 @@
 -- =============================================================================
--- g9-battle-engine-beta boot (round 6 rebuild)
+-- g9-battle-engine boot (round 6 rebuild)
 --
 -- Faithful restoration of the canonical (tectorifter/Gen9Dex) boot sequence:
 -- every subsystem is loaded in the same data-then-engine order the real
@@ -15,7 +15,7 @@
 --     species-evolution patching, evolution-item registration, happiness
 --     evolution, movepool sub-effect wiring (wireMovepoolSubEffects +
 --     installMovepoolEffects), and move-name display -- all pcall-guarded.
---     All 153 sibling files referenced from the entry load (145 canonical
+--     All 150 sibling files referenced from the entry load (142 canonical
 --     repo siblings via loadSibling, byte-identical to tectorifter/
 --     Gen9Dex, plus 8 round-4 damage-brain files via require).
 --   * trainers/temp_test_registrations.lua (test artifact) is skipped;
@@ -25,8 +25,8 @@
 --     full parallel Dynamax engine gimmick_dynamax would double-count --
 --     instead we boot gigantamax/dynamax_battle.lua, the consume-only
 --     processor reading battle_forms' dynamax_applied/dynamax_reverted
---     trigger (Dynamax Level drive into battle_forms' own HP stamp, Gen 1
---     size-up; the Showdown-verified Max/G-Max move secondaries live in
+--     trigger (Dynamax Level drive into battle_forms' own HP stamp; the
+--     Showdown-verified Max/G-Max move secondaries live in
 --     gigantamax/max_move_subeffects.lua, processed exactly like every
 --     other move in this mod).
 --     installGigantamaxMoves (canonical-disabled) and derivedHeightWeight
@@ -44,7 +44,8 @@
 -- registerDamageModifier, changeStage, currentWeather, setWeather,
 -- setMonDynamaxLevel, setGigantamaxFactor, setTeraType, getTeraType,
 -- isTerastallized, ShowdownPrimitives, ModernStats, MoveCategory,
--- damagePipeline, and every register*Modifier chain.
+-- damagePipeline, moveUsability/moveUsabilityReason/moveUsabilityFlag/
+-- registerMoveUsabilityGate/itemMoveBanned, and every register*Modifier chain.
 -- =============================================================================
 -- >>> gen1recomp-mod-studio require-bridge (managed block; the studio re-adds/repairs this on every build — keep it intact) <<<
 -- gen1recomp runs ONLY this entry file (Loader.lua calls chunk(api)), and
@@ -108,6 +109,20 @@ local function isMoveDataComplete(liveRecord)
   return liveRecord.effect ~= nil and liveRecord.effect ~= "NO_ADDITIONAL_EFFECT"
 end
 
+-- Moves whose national_dex record carries a statChanges/statChance pair that
+-- this generic secondary listener must NOT apply, because their real
+-- mechanic is owned by a bespoke handler elsewhere in this mod. Checked at
+-- the top of the listener, keyed by move id.
+--
+-- SYRUPBOMB (combat/modern_stat_manipulation.lua): national_dex's own record
+-- has statChance=100 with a Speed -1, but its `shortEffect` is the empty
+-- string, so this file's own `saysUsers`/`saysTargets` direction heuristic
+-- reads `statSelfDirected` as false (NOT nil) and the generic branch below
+-- would apply a one-time target Speed -1 on the hit. The real move coats the
+-- target for exactly 3 end-of-turn Speed -1 ticks instead; that file's own
+-- listener is the only correct application.
+local GENERIC_SECONDARY_EXEMPT = { SYRUPBOMB = true }
+
 local function installMovepoolEffects(mod)
   local nationalDex = mod.find and mod.find("national_dex")
   assert(nationalDex and nationalDex.exports and nationalDex.exports.moveById,
@@ -144,6 +159,10 @@ local function installMovepoolEffects(mod)
     local user = ev and ev.user
     local damage = ev and ev.damage
     if not (battle and moveId and target) then return end
+    -- Moves whose real secondary is owned by a bespoke handler elsewhere
+    -- (see GENERIC_SECONDARY_EXEMPT above) must not also get the generic
+    -- stat-change applied here.
+    if GENERIC_SECONDARY_EXEMPT[moveId] then return end
     local ok, info = pcall(moveById, moveId)
     if not (ok and info) then return end
     local flinchChance = (info.flinchChance or 0) > 0 and info.flinchChance or nil
@@ -313,8 +332,23 @@ local function installMovepoolEffects(mod)
       if confuseChance and percentRoll(confuseChance)
           and not (hasStatusImmunity and hasStatusImmunity(target, "confusion", battle)) then
         if gen2 then
-          local vol = battle:volatile(target)
-          if not vol.confuseCount then vol.confuseCount = rangeRoll(2, 5) end
+          -- Route through the real Battle:applyConfusion (gen2/Battle.lua:
+          -- 3452) rather than writing volatile.confuseCount directly.
+          -- combat/modern_terrain.lua wraps that exact dotted entry point
+          -- precisely because every native confusion source funnels
+          -- through it -- writing the field here bypassed that wrap, so
+          -- Misty Terrain failed to block a move secondary's confusion (a
+          -- real, flagged gap this closes). `user` is passed as the source
+          -- so the native Safeguard cross-side check fires exactly as it
+          -- does for any other infliction, and the native already-confused
+          -- guard replaces the old manual one. Fallback kept for the odd
+          -- minimal battle stub with no applyConfusion method.
+          if battle.applyConfusion then
+            battle:applyConfusion(target, nil, user)
+          else
+            local vol = battle:volatile(target)
+            if not vol.confuseCount then vol.confuseCount = rangeRoll(2, 5) end
+          end
         elseif not target.confusedTurns then
           target.confusedTurns = rangeRoll(2, 5)
         end
@@ -328,13 +362,70 @@ local function installMovepoolEffects(mod)
       -- immunity (status_immunity.lua wraps these same functions) and
       -- the one-status-at-a-time rule natively -- nothing to re-check
       -- here.
-      if ailmentChance and not modeled and percentRoll(ailmentChance) then
+      --
+      -- Phase 11 (Corrosion): but NEITHER primitive enforces the real
+      -- TYPE-based status immunity -- confirmed by direct read of
+      -- gen2/Battle.lua:3396-3438, whose applyStatus never consults the
+      -- target's types -- so this site checks it itself via
+      -- modern_combat.lua's own statusTypeImmune (a Fire-type can't be
+      -- burned, a Poison-/Steel-type can't be poisoned). The one real
+      -- pierce is Corrosion: Showdown's Pokemon#setStatus skips the
+      -- immunity entirely when the inflicting source holds it and the
+      -- status is psn/tox (sim/pokemon.ts:1710) -- corrosionPiercesPoison
+      -- below.
+      local typeImmune = mod.exports.statusTypeImmune
+        and mod.exports.statusTypeImmune(battle, target, ailmentKey)
+      local corrosionPierce = mod.exports.corrosionPiercesPoison
+        and mod.exports.corrosionPiercesPoison(user)
+      if ailmentChance and not modeled and not (typeImmune and not corrosionPierce)
+          and percentRoll(ailmentChance) then
+        local landed
         if gen2 then
-          battle:applyStatus(target, ailmentCodes.gen2, moveId)
+          landed = battle:applyStatus(target, ailmentCodes.gen2, moveId)
         else
           local StatusRegistry = require("src.battle.StatusRegistry")
           StatusRegistry.inflict(battle, target, ailmentCodes.gen1,
             { secondary = true, moveType = info.type, source = moveId, toxic = ailmentCodes.isToxic })
+          local raw = target and (target.mon or target)
+          landed = raw and raw.status ~= nil
+        end
+        -- Phase 11 (Poison Puppeteer): a target poisoned by Pecharunt's
+        -- OWN MOVE also becomes confused. Showdown's ability hook
+        -- (abilities.ts:3357-3365) fires only when the inflicting source
+        -- IS the ability holder, the target isn't the source, the status
+        -- is psn/tox, and the effect is a Move -- which is exactly this
+        -- generic secondary path (an ABILITY-inflicted poison, e.g.
+        -- Poison Touch, is an Ability effect and deliberately does NOT
+        -- trigger it). The real `source.baseSpecies.name !== "Pecharunt"`
+        -- guard is honored (national_dex assigns Poison Puppeteer only
+        -- to Pecharunt, so it is belt-and-braces, but it keeps the ability
+        -- faithful if it is ever copied). Confusion respects Own Tempo via
+        -- the same hasStatusImmunity gate the generic confusion branch
+        -- above uses.
+        if landed and (ailmentKey == "poison" or ailmentKey == "toxic") and user
+            and mod.exports.abilityIdOf and mod.exports.abilityIdOf(user) == "POISONPUPPETEER"
+            and target ~= user
+            and not (hasStatusImmunity and hasStatusImmunity(target, "confusion", battle)) then
+          local rawUser = user.mon or user
+          local species = rawUser and rawUser.species
+          if species == nil or tostring(species):upper():gsub("[^%w]", "") == "PECHARUNT" then
+            if gen2 then
+              -- Same real entry point as the generic confusion branch
+              -- above: routing this through Battle:applyConfusion lets
+              -- Misty Terrain block a Poison Puppeteer confusion too
+              -- (Showdown's mistyterrain condition nullifies 'confusion'
+              -- via onTryAddVolatile), with `user` -- the ability holder --
+              -- as the inflicting source.
+              if battle.applyConfusion then
+                battle:applyConfusion(target, nil, user)
+              else
+                local vol = battle:volatile(target)
+                if not vol.confuseCount then vol.confuseCount = rangeRoll(2, 5) end
+              end
+            elseif not target.confusedTurns then
+              target.confusedTurns = rangeRoll(2, 5)
+            end
+          end
         end
       end
       -- Generic secondary stat change -- reuses changeStage (Phase 0's
@@ -434,7 +525,14 @@ local function installMovepoolEffects(mod)
           if pre then realDamage = math.min(damage, pre) end
           local amount = math.max(1, math.floor(realDamage * math.abs(drainPercent) / 100))
           if drainPercent > 0 then
-            if maxHp then m.hp = math.min(maxHp, (m.hp or 0) + amount) end
+            -- Heal Block / boss "healblock": drain-healing is gated like every
+            -- other recovery.
+            local tryHeal = mod.exports.g9TryHeal
+            if tryHeal then
+              tryHeal(battle, user, amount)
+            elseif maxHp then
+              m.hp = math.min(maxHp, (m.hp or 0) + amount)
+            end
           else
             -- Real recoil immunities: Rock Head (blocks recoil
             -- unconditionally, no other effect to this ability) and
@@ -533,7 +631,7 @@ local function installMovepoolEffects(mod)
       end
     end)
     if not applyOk then
-      mod.log:warn("g9-battle-engine-beta: GALAR_TRAP_EFFECT listener failed: %s",
+      mod.log:warn("g9-battle-engine: GALAR_TRAP_EFFECT listener failed: %s",
         tostring(applyErr))
     end
   end)
@@ -549,7 +647,30 @@ end
 -- below rather than registered as part of a full move entry. national_
 -- dex has no equivalent field -- this mod invented it, it belongs here
 -- as a small hardcoded map, not a file.
-local BYPASSES_PROTECT = { FEINT = true }
+local BYPASSES_PROTECT = {
+  FEINT = true,
+  -- Phase 18 (missing-effects plan): the protect-breaking family. Phantom
+  -- Force / Shadow Force (moves.ts:13308 / :16074, both `breaksProtect:
+  -- true` -- the two-turn vanish moves punch through a shield on release)
+  -- and Hyperspace Hole (moves.ts:9194, `breaksProtect: true`, also
+  -- `bypasssub` -- a real Substitute pierce this file does not model, see
+  -- combat/modern_guard_contact.lua's own honest-partial note).
+  PHANTOMFORCE = true,
+  SHADOWFORCE = true,
+  HYPERSPACEHOLE = true,
+}
+
+-- Phase 18 (missing-effects plan): the two move-record flags Showdown's
+-- own `ignoreDefensive` / `ignoreEvasion` / `ignoreAbility` families carry.
+-- Read live by combat/modern_combat.lua's damage formula (ignoreDefensive),
+-- combat/modern_guard_contact.lua's battle.accuracy / battle.damage wraps
+-- (ignoreEvasion / ignoreAbility). Kept as small hardcoded maps here for the
+-- same reason BYPASSES_PROTECT is one: national_dex has no equivalent
+-- fields, so this mod owns the vocabulary and wireMovepoolSubEffects stamps
+-- it onto the live record.
+local IGNORE_DEFENSIVE = { CHIPAWAY = true, SACREDSWORD = true, DARKESTLARIAT = true }
+local IGNORE_EVASION = { CHIPAWAY = true, SACREDSWORD = true, DARKESTLARIAT = true }
+local IGNORE_ABILITY = { MOONGEISTBEAM = true, SUNSTEELSTRIKE = true }
 
 -- Every move whose real custom effect handler (registered elsewhere in
 -- this mod, with REAL run/afterDamage/charge logic -- verified one by
@@ -680,6 +801,9 @@ local CUSTOM_EFFECT_PATCH = {
   WORRYSEED = "GALAR_WORRYSEED_EFFECT",
   ENTRAINMENT = "GALAR_ENTRAINMENT_EFFECT",
   GASTROACID = "GALAR_GASTROACID_EFFECT",
+  ROLEPLAY = "GALAR_ROLEPLAY_EFFECT",
+  SIMPLEBEAM = "GALAR_SIMPLEBEAM_EFFECT",
+  DOODLE = "GALAR_DOODLE_EFFECT",
   -- combat/modern_movepool_stages.lua -- primary() (pure status moves)
   AROMATICMIST = "GMAX_AROMATICMIST_EFFECT",
   BULKUP = "GMAX_BULKUP_EFFECT",
@@ -739,6 +863,88 @@ local CUSTOM_EFFECT_PATCH = {
   SUPERPOWER = "GMAX_SUPERPOWER_EFFECT",
   -- combat/modern_movepool_stages.lua -- Clear Smog (its own registration)
   CLEARSMOG = "GMAX_CLEARSMOG_EFFECT",
+  -- combat/modern_move_flags.lua -- the MINIMIZE move itself: evasion +2
+  -- through each engine's native stage path, plus the "minimized" volatile
+  -- that the eight minimizer-hitting moves read (Body Slam, Stomp, ...).
+  -- See that file's own section 5 for the Showdown citation.
+  MINIMIZE = "GALAR_MINIMIZE_EFFECT",
+  -- combat/modern_stat_manipulation.lua (round 70, missing-effects phase 2)
+  -- -- stat-stage and stat-source manipulation. Every one of these is a
+  -- move national_dex leaves at EFFECT_NORMAL_HIT / NO_ADDITIONAL_EFFECT
+  -- with no generic bucket able to express it (a swap/split needs both
+  -- battlers' stages or raw stats at once; Topsy-Turvy needs the whole
+  -- stage table; Power Shift needs a toggleable raw-stat state; Strength
+  -- Sap and Syrup Bomb are their own bespoke mechanics).
+  POWERSWAP = "GALAR_POWERSWAP_EFFECT",
+  GUARDSWAP = "GALAR_GUARDSWAP_EFFECT",
+  HEARTSWAP = "GALAR_HEARTSWAP_EFFECT",
+  SPEEDSWAP = "GALAR_SPEEDSWAP_EFFECT",
+  POWERSPLIT = "GALAR_POWERSPLIT_EFFECT",
+  GUARDSPLIT = "GALAR_GUARDSPLIT_EFFECT",
+  POWERSHIFT = "GALAR_POWERSHIFT_EFFECT",
+  STRENGTHSAP = "GALAR_STRENGTHSAP_EFFECT",
+  TOPSYTURVY = "GALAR_TOPSYTURVY_EFFECT",
+  ACUPRESSURE = "GALAR_ACUPRESSURE_EFFECT",
+  SYRUPBOMB = "GALAR_SYRUPBOMB_EFFECT",
+  SHELLSMASH = "GMAX_SHELLSMASH_EFFECT",
+  SPICYEXTRACT = "GMAX_SPICYEXTRACT_EFFECT",
+  -- combat/modern_crit_override.lua (round 71, missing-effects phase 3) --
+  -- Laser Focus only; the five always-crit moves need no effect entry (their
+  -- override lives in the crit-stage chain, keyed off the `alwaysCrit` field
+  -- main.lua itself patches from national_dex's critRate sentinel).
+  LASERFOCUS = "GALAR_LASERFOCUS_EFFECT",
+  -- combat/modern_movepool_stages.lua -- Phase 15 (missing-effects plan):
+  -- self stat-stage boosts plus the target-directed drops sharing the
+  -- primitive. national_dex leaves all 19 at statChance = 0, so the
+  -- generic secondary listener never applied them; Baby-Doll Eyes /
+  -- Feather Dance / Howl / Shelter already carried a native effect id but
+  -- that wrote the engine's own stage table, which computeModernDamage
+  -- never reads -- repointing them at the modern store is the real fix.
+  QUIVERDANCE = "GMAX_QUIVERDANCE_EFFECT",
+  VICTORYDANCE = "GMAX_VICTORYDANCE_EFFECT",
+  TAILGLOW = "GMAX_TAILGLOW_EFFECT",
+  WORKUP = "GMAX_WORKUP_EFFECT",
+  AUTOTOMIZE = "GMAX_AUTOTOMIZE_EFFECT",
+  DEFENDORDER = "GMAX_DEFENDORDER_EFFECT",
+  SHELTER = "GMAX_SHELTER_EFFECT",
+  HOWL = "GMAX_HOWL_EFFECT",
+  TICKLE = "GMAX_TICKLE_EFFECT",
+  FEATHERDANCE = "GMAX_FEATHERDANCE_EFFECT",
+  BABYDOLLEYES = "GMAX_BABYDOLLEYES_EFFECT",
+  CAPTIVATE = "GMAX_CAPTIVATE_EFFECT",
+  FILLETAWAY = "GMAX_FILLETAWAY_EFFECT",
+  BELLYDRUM = "GMAX_BELLYDRUM_EFFECT",
+  CURSE = "GMAX_CURSE_EFFECT",
+  TIDYUP = "GMAX_TIDYUP_EFFECT",
+  GEARUP = "GMAX_GEARUP_EFFECT",
+  MAGNETICFLUX = "GMAX_MAGNETICFLUX_EFFECT",
+  GEOMANCY = "GMAX_GEOMANCY_EFFECT",
+  -- combat/modern_recovery_moves.lua -- Phase 16 (missing-effects plan):
+  -- Roost is repointed so its two halves (the native 50% heal plus the
+  -- Flying-type drop for the turn) resolve in one handler; Aqua Ring has
+  -- no native effect at all, so its volatile lives entirely there.
+  -- Heal Order / Milk Drink / Slack Off are deliberately ABSENT: their
+  -- plain 50% heal is already handled natively on both generations
+  -- (national_dex gen1EffectModeled/gen2EffectModeled = true), so
+  -- repointing them would only replace a working handler with a copy.
+  ROOST = "GALAR_ROOST_EFFECT",
+  AQUARING = "GALAR_AQUARING_EFFECT",
+  -- combat/modern_charge_moves.lua -- Phase 17 (missing-effects plan): the
+  -- three charge moves repointed at their own charge-record ids (the Solar
+  -- Beam / Bounce mechanism). Ice Ball / Rollout / Echoed Voice need no
+  -- effect entry -- their power ladders run through registerPowerOverride
+  -- alone -- and Shell Trap / Beak Blast need none either (their arming and
+  -- reaction live on the turn_started/damage_dealt events).
+  SOLARBLADE = "GALAR_SOLARBLADE_EFFECT",
+  METEORBEAM = "GALAR_METEORBEAM_EFFECT",
+  SKYDROP = "GALAR_SKYDROP_EFFECT",
+  -- combat/modern_guard_contact.lua -- Phase 18 (missing-effects plan): the
+  -- two vanish-and-strike moves repointed at their own charge-record ids
+  -- (the Sky Drop shape). Their `breaksProtect` flag is applied separately
+  -- via BYPASSES_PROTECT above; the ignore-ability/evasion flags are read
+  -- live off the record by the guard/contact handlers.
+  PHANTOMFORCE = "GALAR_PHANTOMFORCE_EFFECT",
+  SHADOWFORCE = "GALAR_SHADOWFORCE_EFFECT",
 }
 
 -- Completeness, read ENTIRELY from national_dex's own modern fields --
@@ -775,12 +981,29 @@ local function wireMovepoolSubEffects(mod)
       if ok and info then
         local patch = {}
         if BYPASSES_PROTECT[id] then patch.bypassesProtect = true end
+        if IGNORE_DEFENSIVE[id] then patch.ignoreDefensive = true end
+        if IGNORE_EVASION[id] then patch.ignoreEvasion = true end
+        if IGNORE_ABILITY[id] then patch.ignoreAbility = true end
         if CUSTOM_EFFECT_PATCH[id] then patch.effect = CUSTOM_EFFECT_PATCH[id] end
         -- critRate is the number of +1 crit-stage bumps the move itself
         -- grants (confirmed: Cross Poison critRate=1, a real high-crit
         -- move; Axe Kick/Baddy Bad critRate=0, ordinary) -- >=1 maps onto
-        -- this engine's own boolean highCrit field.
-        if (info.critRate or 0) >= 1 then patch.highCrit = true end
+        -- this engine's own boolean highCrit field. A value of exactly 6 is
+        -- national_dex's sentinel for Showdown's `willCrit: true` (all 833
+        -- records: 0 ordinary, 1 the 25 real high-crit moves, 6 exactly the
+        -- five always-crit moves -- Wicked Blow, Surging Strikes, Frost
+        -- Breath, Storm Throw, Flower Trick), which combat/
+        -- modern_crit_override.lua reads as `alwaysCrit` (a guaranteed crit,
+        -- still negated by Battle Armor / Shell Armor like Showdown's own
+        -- CriticalHit event). A critRate>=6 move whose dex accuracy is 0 is
+        -- also marked sureHit (Flower Trick's Showdown `accuracy: true`).
+        local critRate = info.critRate or 0
+        if critRate >= 6 then
+          patch.alwaysCrit = true
+          if (info.accuracy or 1) <= 0 then patch.sureHit = true end
+        elseif critRate >= 1 then
+          patch.highCrit = true
+        end
         -- multiHit: a fixed count (minHits==maxHits, e.g. Double Hit's
         -- 2-2) is just that count twice; the real 2-5 range (Bullet Seed,
         -- Rock Blast, Double Iron Bash) is the well-known, generation-
@@ -971,7 +1194,7 @@ return function(mod)
       ok, res = pcall(fn)
     end
     if not ok then
-      mod.log:warn("g9-battle-engine-beta: [" .. label .. "] failed to initialize: " .. tostring(res))
+      mod.log:warn("g9-battle-engine: [" .. label .. "] failed to initialize: " .. tostring(res))
       mod.exports.__bootReport.failed[label] = tostring(res)
       return nil
     end
@@ -1003,7 +1226,7 @@ return function(mod)
     if ok then
       typeChartLoaded = true
     else
-      mod.log:warn("g9-battle-engine-beta: TypeChart.load failed on battle.started: " .. tostring(err))
+      mod.log:warn("g9-battle-engine: TypeChart.load failed on battle.started: " .. tostring(err))
     end
   end, 1000)
 
@@ -1015,6 +1238,18 @@ return function(mod)
   mod.exports.ModernStats = mod.exports.ModernStats or loadSibling("stats/engine_modern_stats.lua")
   mod.exports.MoveCategory = mod.exports.MoveCategory or loadSibling("combat/engine_move_category.lua")
   mod.exports.isMoveDataComplete = isMoveDataComplete
+
+  -- --------------------------------------------------------------------------
+  -- Damage Numbers option read (round 105). options.lua row
+  -- "damage_numbers" (renamed from show_hp_lost_messages); exposed so
+  -- g9-Battle-Scene can gate its floating damage/recovery numbers on the
+  -- same option the Mod Manager shows. mod.options:get is read LAZILY
+  -- here (the schema is defined later, in debug_options' boot), and the
+  -- option is only ever consulted at battle/event time, long after boot.
+  -- --------------------------------------------------------------------------
+  mod.exports.damageNumbersEnabled = function()
+    return mod.options:get("damage_numbers") == "true"
+  end
 
   boot("save_scrub", function() return loadSibling("stats/save_scrub.lua")(mod) end)
   boot("wild_modern_ivs", function() return loadSibling("stats/wild_modern_ivs.lua")(mod) end)
@@ -1095,7 +1330,7 @@ return function(mod)
       end
     end
     mod.log:info(string.format(
-      "g9-battle-engine-beta: patched evolutions onto %d species (%d skipped unregistered, %d rows dropped for an unregistered target)",
+      "g9-battle-engine: patched evolutions onto %d species (%d skipped unregistered, %d rows dropped for an unregistered target)",
       patchedEvolutions, skippedSpecies, droppedRows))
     return patchedEvolutions
   end)
@@ -1143,8 +1378,8 @@ return function(mod)
   -- exports.events, fired from its own src/dynamax.lua apply/teardown) and
   -- processes the Dynamax combat properties battle_forms deliberately
   -- leaves open -- Dynamax Level drive (mirrored into battle_forms' own
-  -- battleFormsDynamaxLevel HP-volume stamp) and Gen 1 size-up (battle_forms
-  -- only grows Gen 2). Reads mod.exports lazily at battle time, so it has no
+  -- battleFormsDynamaxLevel HP-volume stamp). Reads mod.exports lazily at
+  -- battle time, so it has no
   -- install-time dependency on modern_combat/modern_terrain (the old "Must
   -- load AFTER ... to capture their changeStage/setWeather/... at install
   -- time" claim was wrong -- those are looked up inside the handlers, not
@@ -1186,10 +1421,28 @@ return function(mod)
   -- next). THIS is the Showdown-formula core of the engine.
   boot("modern_combat", function() return loadSibling("combat/modern_combat.lua")(mod) end)
 
+  -- combat/move_usability.lua (round 100): the engine -> scene "can this mon
+  -- pick this move, and if not why not" query (moveUsability /
+  -- registerMoveUsabilityGate). Booted HERE, right after modern_combat,
+  -- because it only needs modern_combat's isGen2Battle/isGen1Battle/
+  -- displayNameFor/MoveCategory -- and it MUST exist before every file that
+  -- registers a condition gate through it (modern_action_order's Fake Out,
+  -- modern_side_protection's First Impression, modern_faint_sacrifice's Last
+  -- Resort), the earliest of which is modern_action_order ~150 lines below.
+  -- Its item reads are lazy (modern_items boots later) so nothing here is
+  -- order-sensitive.
+  boot("move_usability", function() return loadSibling("combat/move_usability.lua")(mod) end)
+
   boot("legacy_move_takeover", function() return loadSibling("combat/legacy_move_takeover.lua")(mod) end)
   boot("move_targeting", function() return loadSibling("combat/move_targeting.lua")(mod) end)
   boot("boss_fight", function() return loadSibling("combat/boss_fight.lua")(mod) end)
   boot("boss_fight_status", function() return loadSibling("combat/boss_fight_status.lua")(mod) end)
+  -- Heal Block (the move) + the boss-fight "healblock" flag: the ONE gate
+  -- every HP-recovery source routes through, both generations. Boots right
+  -- after boss_fight_status because it reads bossFightHas (combat/
+  -- boss_fight.lua) and wraps the native heal primitives (Gen 1 MoveEffects
+  -- .RECORDS.HEAL_EFFECT, Gen 2 Battle:heal/MOVE_EFFECT_RECORDS.EFFECT_HEAL).
+  boot("heal_block", function() return loadSibling("combat/heal_block.lua")(mod) end)
 
   boot("switchin_stat_change", function()
     local data = loadSibling("abilities/data/stat_change_switchin.lua")
@@ -1248,6 +1501,12 @@ return function(mod)
   -- Turn order: the multi-battler seam g9-Battle-Scene hard-asserts on
   -- (mod.exports.resolveTurnActions). Loading this is what fixes the scene
   -- mods' connectivity.
+  -- Round 67 (2026-09-12): the end-of-turn residual phase + faint
+  -- announcement for scene-driven battles -- the other half of the turn loop
+  -- turn_order.lua's resolveTurnActions opens. Booted just before turn_order
+  -- so its exports exist by the time resolveTurnActions runs (that lookup is
+  -- lazy, but this keeps the intent obvious).
+  boot("turn_residuals", function() return loadSibling("combat/turn_residuals.lua")(mod) end)
   boot("turn_order", function() return loadSibling("combat/turn_order.lua")(mod) end)
   boot("priority_change", function()
     local data = loadSibling("abilities/data/priority_change.lua")
@@ -1277,6 +1536,16 @@ return function(mod)
     local data = loadSibling("abilities/data/status_cure.lua")
     return loadSibling("abilities/engine/status_cure.lua")(mod, data)
   end)
+  -- combat/modern_move_flags.lua (round 68, category-3 flag audit): reads
+  -- the cantusetwice/defrost/powder/minimize flags live from national_dex
+  -- and installs the MoveFlag rules at each engine's real execution gate.
+  -- Booted HERE, right after status_cure: its Status.beforeMove / canAct /
+  -- useMove wraps then sit BELOW modern_status_effects' own wraps
+  -- (installed later) and power.lua's (later still) -- those call through
+  -- to it with moveId forwarded (see modern_status_effects' own comment) --
+  -- and cureStatusOf (status_cure, boots just above) is already exported
+  -- for the defrost branch.
+  boot("modern_move_flags", function() return loadSibling("combat/modern_move_flags.lua")(mod) end)
   boot("contact_retaliation", function()
     local data = loadSibling("abilities/data/contact_retaliation.lua")
     return loadSibling("abilities/engine/contact_retaliation.lua")(mod, data)
@@ -1284,10 +1553,72 @@ return function(mod)
   boot("modern_status_volatiles", function() return loadSibling("combat/modern_status_volatiles.lua")(mod) end)
   boot("trick_room", function() return loadSibling("combat/trick_room.lua")(mod) end)
   boot("modern_movepool_stages", function() return loadSibling("combat/modern_movepool_stages.lua")(mod) end)
+  -- combat/modern_stat_manipulation.lua (round 70, missing-effects phase 2):
+  -- the stat-stage/raw-stat swap-split-Shift-Topsy family plus Strength Sap,
+  -- Acupressure, Shell Smash, Spicy Extract and Syrup Bomb. Booted right
+  -- after modern_movepool_stages: both need modern_combat's stage store and
+  -- changeStage, and this file extends the same "stat manipulation" area
+  -- that helper owns.
+  boot("modern_stat_manipulation", function() return loadSibling("combat/modern_stat_manipulation.lua")(mod) end)
+  -- combat/modern_crit_override.lua (round 71, missing-effects phase 3): the
+  -- five always-crit moves (national_dex critRate 6) plus Laser Focus's
+  -- guaranteed-crit volatile and Flower Trick's sure-hit. Booted right after
+  -- modern_stat_manipulation; it needs modern_combat's registerCritStageModifier
+  -- chain and the battle.accuracy hook (both installed far earlier).
+  boot("modern_crit_override", function() return loadSibling("combat/modern_crit_override.lua")(mod) end)
+  -- combat/modern_damage_source.lua (missing-effects phase 4): the
+  -- damage-stat source overrides -- Body Press (user's Defense) and Foul
+  -- Play (target's Attack). Needs modern_combat's registerDamageSourceOverride
+  -- seam (installed far earlier), so it boots after modern_crit_override.
+  boot("modern_damage_source", function() return loadSibling("combat/modern_damage_source.lua")(mod) end)
+  -- combat/modern_action_order.lua (missing-effects phase 5): the chosen-
+  -- move fail gates (Sucker Punch/Thunderclap/Upper Hand/Fake Out/Focus
+  -- Punch) and the live reorder seam (After You/Quash). Needs turn_order's
+  -- phase-5 exports (chosenMoveOf/prioritizeActor/deprioritizeActor) and
+  -- modern_combat_protect's Battle.useMove wrap, so it boots after both --
+  -- modern_damage_source is simply the last phase milestone before it.
+  boot("modern_action_order", function() return loadSibling("combat/modern_action_order.lua")(mod) end)
+  -- combat/modern_party_support.lua + combat/modern_faint_sacrifice.lua
+  -- (missing-effects phase 6): party recovery/sacrifice (Aromatherapy,
+  -- Heal Bell, Jungle Healing, Refresh, Take Heart, Wish, Revival
+  -- Blessing, Healing Wish, Lunar Dance, Memento, Destiny Bond, Grudge,
+  -- Last Resort). They need status_cure's cureStatusOf (loaded above),
+  -- modern_combat's changeStage/normalize/displayNameFor, and
+  -- modern_action_order's registerFailGate seam, so they boot right after
+  -- it.
+  boot("modern_party_support", function() return loadSibling("combat/modern_party_support.lua")(mod) end)
+  boot("modern_faint_sacrifice", function() return loadSibling("combat/modern_faint_sacrifice.lua")(mod) end)
   boot("modern_movepool_status", function() return loadSibling("combat/modern_movepool_status.lua")(mod) end)
   boot("modern_movepool_damage", function() return loadSibling("combat/modern_movepool_damage.lua")(mod) end)
+  -- combat/modern_recovery_moves.lua (missing-effects phase 16): the heal
+  -- family -- Roost (repointed so the 50% heal and the Flying-type drop
+  -- for the turn resolve together) and Aqua Ring (a 1/16 end-of-turn self
+  -- volatile with no native effect at all). It wraps modern_tera's own
+  -- defensiveTypesOf export (booted far earlier) and reads modern_combat's
+  -- normalize/displayNameFor, so it sits with the other movepool heals.
+  boot("modern_recovery_moves", function() return loadSibling("combat/modern_recovery_moves.lua")(mod) end)
+  -- combat/modern_charge_moves.lua (missing-effects phase 17): charge moves
+  -- (Solar Blade / Meteor Beam / Sky Drop), the consecutive-use power
+  -- ladders (Ice Ball / Rollout / Echoed Voice) and the two priority-charge
+  -- reactions (Shell Trap / Beak Blast). It needs modern_combat's
+  -- registerPowerOverride/changeStage, modern_action_order's registerFailGate
+  -- (booted earlier) and the engine's battle.charge_required hook, so it
+  -- boots right after modern_recovery_moves.
+  boot("modern_charge_moves", function() return loadSibling("combat/modern_charge_moves.lua")(mod) end)
   boot("modern_movepool_counter", function() return loadSibling("combat/modern_movepool_counter.lua")(mod) end)
+  -- (missing-effects phase 13): conditional / variable power (Avalanche,
+  -- Bolt Beak/Fishious Rend, Hex, Facade, Brine, Payback, Fusion Bolt/
+  -- Flare, Lashout, Psyblade, Expanding Force, Retaliate, Smellingsalts,
+  -- Wake-Up Slap, Rising Voltage, the Eruption family, Return/
+  -- Frustration, Rage Fist, Stored Power, Last Respects, Fury Cutter).
+  -- Needs only modern_combat's registerDamageModifier/
+  -- registerPowerOverride/stagesFor/sideOfWho/resolvedTypeMult exports
+  -- (all present by now), so it sits with the other movepool entries.
+  -- cureStatusOf (Smellingsalts/Wake-Up Slap) is looked up lazily at
+  -- event time, since status_cure.lua may load later in the boot order.
+  boot("modern_power_conditions", function() return loadSibling("combat/modern_power_conditions.lua")(mod) end)
   boot("modern_status_effects", function() return loadSibling("combat/modern_status_effects.lua")(mod) end)
+  boot("status_condition_cleanup", function() return loadSibling("combat/status_condition_cleanup.lua")(mod) end)
   boot("inflict_status", function()
     local data = loadSibling("abilities/data/inflict_status.lua")
     return loadSibling("abilities/engine/inflict_status.lua")(mod, data)
@@ -1326,6 +1657,13 @@ return function(mod)
   end)
   boot("modern_ability_change_moves", function() return loadSibling("combat/modern_ability_change_moves.lua")(mod) end)
   boot("modern_switch_moves", function() return loadSibling("combat/modern_switch_moves.lua")(mod) end)
+  -- combat/modern_force_switch.lua (round 69, missing-effects phase 1):
+  -- Dragon Tail / Circle Throw target-directed drag. Booted right after
+  -- modern_switch_moves: both need modern_combat's exports and
+  -- switch_primitives' requestSwitch/switchMonAtSide, and both are
+  -- "self/target leaves the field after a damaging hit" effects kept
+  -- together at the same point in the boot.
+  boot("modern_force_switch", function() return loadSibling("combat/modern_force_switch.lua")(mod) end)
   boot("modern_terrain", function() return loadSibling("combat/modern_terrain.lua")(mod) end)
   boot("switchin_terrain", function()
     local data = loadSibling("abilities/data/terrain_switchin.lua")
@@ -1342,9 +1680,147 @@ return function(mod)
     return loadSibling("abilities/engine/switchin_primal_weather.lua")(mod, data)
   end)
   boot("modern_hazards", function() return loadSibling("combat/modern_hazards.lua")(mod) end)
+  -- combat/modern_side_conditions.lua (missing-effects phase 7): Court
+  -- Change (swap both sides' side conditions), Brick Break/Psychic Fangs
+  -- (shatter the defender's screens before the hit), Defog (clear the
+  -- target side's screens+hazards, the user side's hazards and the
+  -- terrain), Magic Coat / Snatch (one-turn interception volatiles read
+  -- by the Battle.useMove wrap) and Imprison (a usableMoves filter). It
+  -- reads modern_hazards' hazardsFor store and wraps Battle:useMove /
+  -- Battle:usableMoves, so it boots right after modern_hazards.
+  boot("modern_side_conditions", function() return loadSibling("combat/modern_side_conditions.lua")(mod) end)
+  -- combat/modern_item_facts.lua (item-effects phase 24): the ROM-vs-
+  -- Showdown item-id bridge (norm + the BLACKBELT_I rename) and the
+  -- nil-tolerant itemFlags accessors -- itemFact / itemFlingFacts /
+  -- isBerryItem / isPokeballItem / itemSpeciesMatch -- plus the True-Past
+  -- override table for the thirteen items flags.lua cannot describe (the
+  -- ten Gen-2 berries, Pink/Polkadot Bow, Berserk Gene). It registers no
+  -- behaviour and reads no held item itself; it exists so every later item
+  -- phase shares one id rewrite instead of re-deriving it. Booted before
+  -- modern_items, which consumes it.
+  boot("modern_item_facts", function() return loadSibling("combat/modern_item_facts.lua")(mod) end)
   boot("modern_items", function() return loadSibling("combat/modern_items.lua")(mod) end)
+  -- combat/modern_held_item_api.lua (round 98): the public held-item storage
+  -- API + cross-battle restore. Gen 1 gets a saved `mon.g9HeldItem` slot
+  -- (setHeldItem / getHeldItem / clearHeldItem) because the engine gives it
+  -- no item field at all; both generations get a player-party equipment
+  -- snapshot on battle.started and a battle.ended restore of any item that
+  -- was flung / stolen / lost / consumed during the fight (on Gen 2
+  -- `Battle.party IS save.party`, so those `mon.item = nil` writes would
+  -- otherwise delete it from the save for good). It reads only
+  -- modern_combat's isGen2Battle, so it boots right after modern_items.
+  boot("modern_held_item_api", function() return loadSibling("combat/modern_held_item_api.lua")(mod) end)
+  -- combat/modern_type_modify_moves.lua (missing-effects phase 14): the
+  -- onModifyType / onModifyMove family -- Hidden Power, Judgment,
+  -- Multi-Attack, Revelation Dance, Techno Blast, Natural Gift, Raging
+  -- Bull, Weather Ball, Terrain Pulse, Tera Blast, Tera Starstorm and
+  -- Photon Geyser. It wraps battle.damage (the Aerilate-family seam) and
+  -- registers power overrides, reading modern_items' itemOf lazily, so it
+  -- boots right after modern_items.
+  boot("modern_type_modify_moves", function() return loadSibling("combat/modern_type_modify_moves.lua")(mod) end)
+  -- combat/modern_field_effects.lua (missing-effects phase 8): Gravity, Ion
+  -- Deluge, Electrify, Mud/Water Sport, Nature Power, Powder, Tailwind,
+  -- Aurora Veil, Lucky Chant, Fairy Lock and Tea Time. It reads
+  -- modern_combat's normalize/currentWeather/registerDamageModifier,
+  -- modern_weather's weather state, field_duration's resolveFieldDuration,
+  -- modern_side_conditions' screens table (it rides Aurora Veil/Lucky
+  -- Chant/Tailwind in there so Court Change/Defog/Brick Break see them) and
+  -- modern_items' berry applier (Tea Time), and wraps Battle:useMove /
+  -- Battle:effectiveSpeed / Battle:switchLocked, so it boots right after
+  -- modern_items.
+  boot("modern_field_effects", function() return loadSibling("combat/modern_field_effects.lua")(mod) end)
+  -- combat/modern_trap_moves.lua (missing-effects phase 9): the non-chip
+  -- trapping family -- Mean Look / Block / Spider Web (status pins), Jaw Lock
+  -- (pins BOTH sides), Anchor Shot / Spirit Shackle (damaging pins) and
+  -- Octolock (pin + a real Def/SpD -1 residual). It reads modern_combat's
+  -- normalize/displayNameFor/curTypesOf/changeStage and move_targeting's
+  -- allActiveBattlers, so it boots after both.
+  boot("modern_trap_moves", function() return loadSibling("combat/modern_trap_moves.lua")(mod) end)
+  -- combat/modern_guard_contact.lua (missing-effects phase 18): the guard /
+  -- contact interaction family -- Phantom Force / Shadow Force / Hyperspace
+  -- Hole protect-breaking (via the bypassesProtect flag stamped by
+  -- wireMovepoolSubEffects), the ignore-defensive/evasion/ability families,
+  -- and the on-hit side effects (terrain clear, Spikes/Stealth Rock
+  -- layering, Thousand Waves' trap, Freezy Frost's reset, Fell Stinger's KO
+  -- boost, Poltergeist/Steel Roller fail gates). It reads
+  -- modern_combat's damage formula + setIgnoredAbilityMon, modern_action_
+  -- order's registerFailGate (both booted earlier), and
+  -- modern_side_conditions' clearTerrain / modern_hazards' hazardsFor /
+  -- modern_trap_moves' trapApplyPin, so it boots right after
+  -- modern_trap_moves.
+  boot("modern_guard_contact", function() return loadSibling("combat/modern_guard_contact.lua")(mod) end)
+  -- combat/modern_item_moves.lua (missing-effects phase 19): the item /
+  -- held-item interaction family -- Trick / Switcheroo's item swap, Bestow's
+  -- item give, Thief's steal, Spectral Thief's boost steal (a pre-damage
+  -- battle.damage wrap), Core Enforcer's ability suppression and Plasma
+  -- Fists' Ion Deluge pseudo-weather (plus Flame Burst's ally splash, a real
+  -- no-op in 1-vs-1). It reads modern_items' isUnremovable, modern_combat's
+  -- stagesFor/changeStage/resolvedTypeMult, modern_ability_change_moves'
+  -- CANNOT_SUPPRESS and ability_dispatch's setAbility -- all booted earlier,
+  -- so it boots right after modern_guard_contact.
+  boot("modern_item_moves", function() return loadSibling("combat/modern_item_moves.lua")(mod) end)
+  -- combat/modern_pivot_moves.lua (missing-effects phase 20): pivots and
+  -- move-copying -- Baton Pass's mod-stage carry, Shed Tail / Chilly
+  -- Reception's self-switch, Assist/Copycat/Instruct's nested useMove,
+  -- Sketch's move-slot rewrite, Lock-On/Mind Reader's native-handler
+  -- re-point, and Psych Up / Psycho Shift. It reads modern_combat's
+  -- normalize/stagesFor/setWeather/canSetWeather/statusTypeImmune,
+  -- switch_primitives' requestSwitch and field_duration's resolver -- all
+  -- booted earlier -- so it boots right after modern_item_moves.
+  boot("modern_pivot_moves", function() return loadSibling("combat/modern_pivot_moves.lua")(mod) end)
+  -- combat/modern_status_moves.lua (missing-effects phase 21): status /
+  -- volatile infliction residue -- Spite / Eerie Spell's PP drain, Sparkling
+  -- Aria's burn-cure rider, Forest's Curse / Trick-or-Treat's added-type slot,
+  -- Power Trick's raw Atk/Def swap, and Magnet Rise's Ground-immunity
+  -- volatile. It reads modern_combat's normalize/displayNameFor/isGen2Battle/
+  -- canonicalStatusOf (the last two also edited there for the Magnet Rise
+  -- immunity), status_condition_cleanup's SWITCH_SCOPED list (two fields
+  -- added) and type_override_primitives' canChangeType -- all booted earlier,
+  -- so it boots right after modern_pivot_moves.
+  boot("modern_status_moves", function() return loadSibling("combat/modern_status_moves.lua")(mod) end)
+  -- combat/modern_side_protection.lua (missing-effects phase 22): field /
+  -- side protection and delayed moves -- Safeguard (forwarded to the base
+  -- engine's own native EFFECT_SAFEGUARD), Wide Guard / Quick Guard /
+  -- Crafty Shield / Mat Block (per-side duration-1 guard flags read by
+  -- one more Battle.useMove wrap), Future Sight / Doom Desire (a
+  -- two-turn side-scheduled hit resolved on battle.turn_ended) and
+  -- Present (a registerPowerOverride roll + a battle.damage heal tier),
+  -- plus the First Impression fail gate and Grassy Glide's terrain
+  -- priority. It reads modern_combat's sideOfWho/normalize/curTypesOf/
+  -- MoveCategory, modern_action_order's registerFailGate,
+  -- turn_order's registerPriorityModifier, modern_combat_protect's new
+  -- armStallChain export and modern_terrain's battle.terrain -- all
+  -- booted earlier -- so it boots right after modern_status_moves
+  -- (before the held-item pool, so its useMove wrap sits closest to the
+  -- native leaf among the move-blocking wraps).
+  boot("modern_side_protection", function() return loadSibling("combat/modern_side_protection.lua")(mod) end)
+  -- combat/modern_self_effects.lua (missing-effects phase 23): the
+  -- `self:`-directed move effects -- the eight recharge moves (Gen 2
+  -- volatile.recharge / Gen 1 mustRecharge), Mind Blown / Steel Beam's
+  -- half-max-HP recoil, Misty Explosion's selfdestruct (plus its own
+  -- Misty-Terrain 1.5x), Glaive Rush's drawback volatile (double damage
+  -- via registerDamageModifier, can't-miss via the battle.accuracy hook),
+  -- Baddy Bad / Glitzy Glow's Reflect / Light Screen, and Sparkly Swirl's
+  -- whole-side status cure. It adds one more Battle.useMove wrap (the
+  -- recoil/selfdestruct must fire through Protect/miss/immunity) and
+  -- reads modern_combat's registerDamageModifier/curTypesOf/sideOfWho,
+  -- modern_party_support's g9NameOf/g9RawMon/g9MaxHpOf/g9SidePartyOf,
+  -- status_cure's cureStatusOf and field_duration's resolveFieldDuration
+  -- -- all booted earlier -- so it boots right after modern_side_protection.
+  boot("modern_self_effects", function() return loadSibling("combat/modern_self_effects.lua")(mod) end)
   boot("modern_held_items", function() return loadSibling("combat/modern_held_items.lua")(mod) end)
   boot("modern_held_items_phase2", function() return loadSibling("combat/modern_held_items_phase2.lua")(mod) end)
+  -- combat/modern_gen1_held_items.lua (round 99): the GEN-1 side of the
+  -- held-item combat wiring. The damage/stat/crit/accuracy item families were
+  -- made dual-generation in the two files above; this file owns only the
+  -- mechanics Gen 1 lacks a native analogue for -- item Speed + Quick
+  -- Claw/Lagging Tail turn-order priority (patches src/battle/TurnOrder),
+  -- Focus Sash/Focus Band survive-at-1 (its own battle.damage wrap above
+  -- damage_pipeline), King's Rock flinch, and Leftovers/Berry Juice residual.
+  -- It reads modern_held_item_api's set/clear/effective accessors and
+  -- modern_combat's isGen2Battle, so it boots after both (and after
+  -- turn_order, whose registerPriorityModifier chain it does not touch).
+  boot("modern_gen1_held_items", function() return loadSibling("combat/modern_gen1_held_items.lua")(mod) end)
   boot("skill_link", function()
     local data = loadSibling("abilities/data/skill_link.lua")
     return loadSibling("abilities/engine/skill_link.lua")(mod, data)
@@ -1427,24 +1903,31 @@ return function(mod)
   boot("redirect_immunity", function()
     return loadSibling("abilities/data/redirect_immunity.lua")
   end)
-  boot("corrosion_deferred", function()
-    return loadSibling("abilities/data/corrosion_deferred.lua")
+  boot("corrosion", function()
+    return loadSibling("abilities/data/corrosion.lua")
+  end)
+
+  -- --------------------------------------------------------------------------
+  -- Phase 0 (missing-effects plan): structural-exemption registry. Names the
+  -- handful of moves whose real mechanic needs a second allied battler and is
+  -- therefore impossible to observe in singles (Ally Switch, Dragon Cheer,
+  -- Follow Me, Helping Hand, Rage Powder, Spotlight) so future audits do not
+  -- re-flag them as gaps. See combat/structural_exemptions.lua and
+  -- combat/NATIVE_COVERAGE.md. It registers no hooks -- it only publishes
+  -- mod.exports.structuralExemptions / isStructurallyExempt.
+  -- --------------------------------------------------------------------------
+  boot("structural_exemptions", function()
+    return loadSibling("combat/structural_exemptions.lua")(mod)
   end)
 
   -- --------------------------------------------------------------------------
   -- Phase C: UI / scene siblings (guarded; they need the engine's render and
-  -- screen surfaces).
+  -- screen surfaces). Round 104 (2026-09-10) emptied this phase: the custom
+  -- menu/party screens (ui/custom_menu_takeover.lua, ui/custom_party_scene.lua)
+  -- and their shared theme (ui/ui_theme.lua) were removed with the
+  -- custom_menu_scene option. The stat screens (stats/*_screen.lua) boot
+  -- earlier in the file.
   -- --------------------------------------------------------------------------
-  local UiTheme = boot("ui_theme", function() return loadSibling("ui/ui_theme.lua") end)
-  boot("custom_party_scene", function()
-    local install = loadSibling("ui/custom_party_scene.lua")
-    return install(mod, UiTheme)
-  end)
-  boot("custom_menu_takeover", function()
-    local install = loadSibling("ui/custom_menu_takeover.lua")
-    return install(mod, UiTheme)
-  end)
-  boot("gen2_wide_scene", function() return loadSibling("combat/gen2_wide_scene.lua")(mod) end)
 
   -- --------------------------------------------------------------------------
   -- Phase D: ecosystem-facing surfaces (the connectivity fixes).
@@ -1495,13 +1978,11 @@ return function(mod)
   -- --------------------------------------------------------------------------
   boot("damage_brain", function()
     local damage_reflection = require("combat/damage/reflection")
-    local item_combat = require("items/item_dispatch")
-    require("items/engine/damage_modifiers")
-    require("items/engine/utility_effects")
-    require("items/engine/status_triggers")
-    require("items/item_effects_combat")
-    require("items/item_effects_dispatch")
-
+    -- Phase 30 (item-effects plan): the old items/ tree's side-effect-only
+    -- loads are gone -- each returned a table nothing consumed and
+    -- registered no hook. combat/damage_pipeline (below) still requires the
+    -- two files it genuinely uses (items/item_dispatch and
+    -- items/engine/damage_modifiers), so nothing live is lost.
     local damage_pipeline = require("combat/damage_pipeline")
     damage_pipeline.ability_system = nil
     mod.exports.damagePipeline = damage_pipeline
@@ -1547,7 +2028,7 @@ return function(mod)
       if ok and type(tbl) == "table" then
         for id in pairs(tbl) do ledger[id] = true end
       else
-        mod.log:warn("g9-battle-engine-beta: [abilities_wired_elsewhere_ledger] " .. file .. " not loaded: " .. tostring(tbl))
+        mod.log:warn("g9-battle-engine: [abilities_wired_elsewhere_ledger] " .. file .. " not loaded: " .. tostring(tbl))
       end
     end
     return ledger
@@ -1561,7 +2042,7 @@ return function(mod)
   local failedCount = 0
   for _ in pairs(mod.exports.__bootReport.failed) do failedCount = failedCount + 1 end
   mod.log:info(string.format(
-    "g9-battle-engine-beta loaded: %d/%d subsystems booted (%d guarded failures); exports live: resolveTurnActions=%s registerTrainer=%s hasRegisteredTrainer=%s askBattleChoice=%s damagePipeline=%s",
+    "g9-battle-engine loaded: %d/%d subsystems booted (%d guarded failures); exports live: resolveTurnActions=%s registerTrainer=%s hasRegisteredTrainer=%s askBattleChoice=%s damagePipeline=%s",
     loadedCount, loadedCount + failedCount, failedCount,
     tostring(type(mod.exports.resolveTurnActions) == "function"),
     tostring(type(mod.exports.registerTrainer) == "function"),

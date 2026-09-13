@@ -1,7 +1,11 @@
--- Dev Tools > DEVSTATS: a diagnostic party-submenu screen for the
--- selected Pokemon, gated entirely behind the "dev_tools" option
--- (options.lua) -- OFF by default, adds nothing to the party submenu
--- when off.
+-- Adv.Stats: a diagnostic party-submenu screen for the selected Pokemon,
+-- gated entirely behind the "adv_stats" option (options.lua) -- OFF by
+-- default, adds nothing to the party submenu when off.
+--
+-- RENAMED (round 105, 2026-09-16) from "Dev Tools > DEVSTATS" to
+-- "Adv.Stats": the option key is "adv_stats", the Mod Manager label is
+-- "ADV.STATS", and the party-submenu entry and every in-screen title read
+-- "Adv.Stats". Nothing else about the screen's content changed.
 --
 -- REBUILT (2026-08-27) after the wide-canvas version crashed silently on
 -- selection, no error dialog shown at all. Diagnosed by comparing against
@@ -9,8 +13,8 @@
 -- party-submenu screen rather than guessing further -- that mod (left
 -- untouched, per explicit instruction) establishes the ACTUAL safe
 -- pattern this file was missing on two counts:
---   1. Plain 160x144 UI size, never touching Renderer:setUISize at all.
---      The 256x144 wide-canvas technique this file used to copy from
+--   1. Plain UI size, never touching Renderer:setUISize at all. The
+--      256x144 wide-canvas technique this file used to copy from
 --      stats/modern_stats_screen.lua is exactly the thing THAT screen's
 --      own "not yet verified against Gen 2" boot gate was protecting
 --      against -- removing that gate without also dropping the technique
@@ -21,8 +25,19 @@
 --      frame (or refuses to open at all), logged via mod.log:warn,
 --      instead of propagating an uncaught error with no visible dialog.
 --
+-- Round 105, Gen 1 only: the window is 20% larger in BOTH axes --
+-- 160x144 -> 192x173 (explicit user request). The screen still only ever
+-- answers Screen:uiSize() (no Renderer:setUISize, no setCanvas), so the
+-- extra size is just a larger surface the engine scales like any other.
+-- 192:173 keeps the base 160:144 aspect ratio (both ~1.11), so the
+-- device fit is unchanged. SX below scales every layout coordinate by the
+-- same 1.2 so the content spreads to fill the bigger window; glyphs stay
+-- their native 8px (there is no text scaler here), which is intentional
+-- -- only the window and the spacing grow. A Gen 2 boot keeps 160x144 and
+-- byte-identical geometry (S == 1).
+--
 -- Three pages ("windows"), cycled with A, same content plan as before,
--- laid out for the real 160px width instead of the removed 256px one:
+-- laid out for the window width / height above:
 --   1. Identity/mechanics: ability, Nature, Tera Type, Dynamax Level,
 --      Gigantamax Factor on/off, the six real combat stats (mon.stats --
 --      already the full BST+EV+IV+Nature computation) plus their sum.
@@ -41,11 +56,23 @@
 return function(mod)
   local ModernStats = mod.exports.ModernStats
   local Font = require("src.render.Font")
+  local GameVersion = require("src.core.GameVersion")
 
   local STAT_LABEL = { hp = "HP", atk = "ATK", def = "DEF", spa = "SPA", spd = "SPD", spe = "SPE" }
   local STAT_ORDER = ModernStats.ORDER -- {"hp","atk","def","spa","spd","spe"}
 
-  local UI_W, UI_H = 160, 144
+  -- Gen 1 gets the 20%-larger window (explicit user request); Gen 2 keeps
+  -- the original geometry exactly. `S` scales every layout coordinate.
+  local isGen1Boot = GameVersion.generation(GameVersion.get()) == 1
+  local S = isGen1Boot and 1.2 or 1.0
+  local BASE_W, BASE_H = 160, 144
+  local UI_W = math.floor(BASE_W * S + 0.5)
+  local UI_H = math.floor(BASE_H * S + 0.5)
+
+  -- One scale for both axes (the window grows 20% in each). With S == 1
+  -- this is the identity, so Gen 2 draws at the exact old coordinates.
+  local function SX(v) return math.floor(v * S + 0.5) end
+
   local NONE = "----"
 
   local function safeText(value)
@@ -54,12 +81,11 @@ return function(mod)
   end
 
   local function row(text, y)
-    Font.draw(text, 4, y)
+    Font.draw(text, SX(4), SX(y))
   end
 
   -- Same idiom learn-any-move's own drawList/drawChooseSlot use for a
-  -- simple label:value line -- one string, one draw call, no column math
-  -- that assumes the wide canvas this file no longer has.
+  -- simple label:value line -- one string, one draw call, no column math.
   local function labelValue(label, value, y)
     row(label .. ": " .. safeText(value), y)
   end
@@ -69,6 +95,7 @@ return function(mod)
   -- Clamped so an out-of-range value never overdraws the box.
   local function drawBar(x, y, barWidth, barHeight, value, max)
     local frac = max > 0 and math.max(0, math.min(1, (value or 0) / max)) or 0
+    x, y, barWidth, barHeight = SX(x), SX(y), SX(barWidth), SX(barHeight)
     love.graphics.setColor(0.8, 0.8, 0.8, 1)
     love.graphics.rectangle("fill", x, y, barWidth, barHeight)
     love.graphics.setColor(0.1, 0.1, 0.1, 1)
@@ -82,7 +109,7 @@ return function(mod)
   local Screen = {}
   Screen.__index = Screen
   Screen.isOpaque = true
-  Screen.screenId = "GgdDevStats"
+  Screen.screenId = "GgdAdvStats"
 
   function Screen:uiSize()
     return UI_W, UI_H
@@ -106,7 +133,7 @@ return function(mod)
   local function safeCall(self, label, fn)
     local ok, err = pcall(fn)
     if not ok then
-      mod.log:warn("g9-battle-engine-beta: dev_stats_screen: %s errored, closing (%s)", label, tostring(err))
+      mod.log:warn("g9-battle-engine: adv_stats_screen: %s errored, closing (%s)", label, tostring(err))
       self.broken = true
     end
   end
@@ -128,7 +155,7 @@ return function(mod)
 
   function Screen:drawPageOne()
     local mon = self.mon
-    row(("DEVSTATS %d/3 IDENTITY"):format(self.page), 2)
+    row(("ADV.STATS %d/3 IDENTITY"):format(self.page), 2)
 
     labelValue("ABILITY", mon.ability, 16)
     labelValue("NATURE", mon.nature, 27)
@@ -171,7 +198,7 @@ return function(mod)
   end
 
   function Screen:drawDistributionPage(title, store, max)
-    row(("DEVSTATS %d/3 %s"):format(self.page, title), 2)
+    row(("ADV.STATS %d/3 %s"):format(self.page, title), 2)
     local total = 0
     for i, key in ipairs(STAT_ORDER) do
       local y = 16 + (i - 1) * 20
@@ -209,15 +236,15 @@ return function(mod)
     -- checks (src/ui/gen2/PartyMenu.lua's real submenu box capacity).
     local NUM_MONMENU_ITEMS = 8
     if not (ctx and ctx.battle) and #result < NUM_MONMENU_ITEMS
-        and mod.options:get("dev_tools") == "true" then
+        and mod.options:get("adv_stats") == "true" then
       result[#result + 1] = {
-        id = "DEVSTATS", label = "DEVSTATS",
+        id = "ADVSTATS", label = "Adv.Stats",
         onSelect = function(selectedMon, selectedGame)
           local ok, screen = pcall(Screen.new, selectedGame, selectedMon)
           if ok and screen then
             selectedGame.stack:push(screen)
           else
-            mod.log:warn("g9-battle-engine-beta: dev_stats_screen: Screen.new errored, not opening (%s)", tostring(screen))
+            mod.log:warn("g9-battle-engine: adv_stats_screen: Screen.new errored, not opening (%s)", tostring(screen))
           end
         end,
       }
@@ -225,5 +252,5 @@ return function(mod)
     return result
   end, 0)
 
-  mod.log:info("g9-battle-engine-beta: dev_stats_screen installed (Dev Tools > DEVSTATS)")
+  mod.log:info("g9-battle-engine: adv_stats_screen installed (Adv.Stats)")
 end

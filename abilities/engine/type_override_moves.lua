@@ -57,7 +57,7 @@ return function(mod, data)
     move.type = origType
     move.ggdTypeOverridden = nil
     if not ok then
-      mod.log:warn("g9-battle-engine-beta: type_override_moves failed: %s", tostring(dmg))
+      mod.log:warn("g9-battle-engine: type_override_moves failed: %s", tostring(dmg))
       return 0, { crit = false, typeMult = 0 }
     end
     return dmg, info
@@ -71,6 +71,6 @@ return function(mod, data)
     return 1.0
   end)
 
-  mod.log:info("g9-battle-engine-beta: type_override_moves installed (AERILATE, PIXILATE, "
+  mod.log:info("g9-battle-engine: type_override_moves installed (AERILATE, PIXILATE, "
     .. "REFRIGERATE, GALVANIZE, DRAGONIZE, NORMALIZE, LIQUIDVOICE)")
 end

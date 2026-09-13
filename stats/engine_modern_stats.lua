@@ -163,7 +163,7 @@ end
 
 -- Public swap API -- explicit user request: "expose an api for changing
 -- hidden abilities <-> to normal abilities. if used by another mod, we
--- swap them." Reachable by any mod via mod:find("g9-battle-engine-beta")
+-- swap them." Reachable by any mod via mod:find("g9-battle-engine")
 -- .exports.ModernStats.toggleHiddenAbility(...) (main.lua already exposes
 -- the whole ModernStats table, no separate wiring needed). This module
 -- owns HOW the swap works; deciding WHEN it happens -- an item, a move
@@ -286,9 +286,8 @@ function ModernStats.resolveEvYield(species, nationalDexExports)
 end
 
 -- Applies a resolved yield (ModernStats.ORDER keys) to mon.evs, enforcing
--- the real EV rules -- 252 max per stat, 510 max total across all six --
--- same capping formula already proven in custom_party_scene.lua's
--- IvEvEditor:changeValue. Deliberately NOT idempotent/guarded: every KO a
+-- the real EV rules -- 252 max per stat, 510 max total across all six.
+-- Deliberately NOT idempotent/guarded: every KO a
 -- mon gains EXP from should grant its yield again, cumulative, exactly like
 -- native mon.statExp already accumulates across every faint.
 function ModernStats.grantEvYield(mon, yield)

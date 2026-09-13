@@ -89,7 +89,8 @@ return function(mod)
   local StatusRegistry = require("src.battle.StatusRegistry")
   local romText = require("src.core.RomText")
   local Strings = require("src.core.Strings")
-  local Battle2 = require("src.battle.gen2.Battle")
+  local gen2Ok_Battle2, Battle2 = pcall(require, "src.battle.gen2.Battle")
+  Battle2 = gen2Ok_Battle2 and Battle2 or nil
 
   local normalize = mod.exports.normalize
   local displayNameFor = mod.exports.displayNameFor
@@ -138,6 +139,15 @@ return function(mod)
   -- Levitate rather than assumed already covered by its own typing.
   local GROUND_IMMUNE_ABILITY = { LEVITATE = true, EELEVATE = true }
   local function isGroundedForHazards(mon, gen2, types)
+    -- Phase 8 Gravity (combat/modern_field_effects.lua): while the field
+    -- effect is up every active mon is grounded, so a Flying-type/Levitate
+    -- mon that would normally float over Spikes/Toxic Spikes/Sticky Web is
+    -- hit by them. Checked before the type/ability exemptions below, which is
+    -- exactly what "grounded" overrides. `mon` may be a raw mon or a battler
+    -- wrapper here (both call shapes exist in this file), so both are probed.
+    if mon and (mon.gravityGrounded or (mon.mon and mon.mon.gravityGrounded)) then
+      return true
+    end
     for _, t in ipairs(types) do
       if t == "FLYING" then return false end
     end
@@ -237,41 +247,45 @@ return function(mod)
   -- itemOrder has no such id), so that second half is structurally moot
   -- here, not deferred.
   ------------------------------------------------------------------
-  Battle2.MOVE_EFFECTS.EFFECT_SPIKES = function(self, attacker, defender)
-    local side = self:sideOf(defender)
-    local layers = self.spikes[side] or 0
-    if layers >= 3 then
-      self:markMissed()
-      self:emit({ kind = "message", text = "But it failed!" })
-      return
+  if Battle2 then
+    Battle2.MOVE_EFFECTS.EFFECT_SPIKES = function(self, attacker, defender)
+      local side = self:sideOf(defender)
+      local layers = self.spikes[side] or 0
+      if layers >= 3 then
+        self:markMissed()
+        self:emit({ kind = "message", text = "But it failed!" })
+        return
+      end
+      self.spikes[side] = layers + 1
+      self:emit({ kind = "message", text = "Spikes were scattered all around!" })
     end
-    self.spikes[side] = layers + 1
-    self:emit({ kind = "message", text = "Spikes were scattered all around!" })
   end
 
   -- Showdown's own [0, 3, 4, 6] table (24ths of maxhp), re-keyed 1-3
   -- instead of 0-3 since Lua has no meaningful "0 layers" damage call.
   local SPIKES_DAMAGE_24THS = { [1] = 3, [2] = 4, [3] = 6 }
 
-  function Battle2:spikesDamage(mon)
-    local side = self:sideOf(mon)
-    local layers = self.spikes[side] or 0
-    if layers <= 0 or (mon.hp or 0) <= 0 then return end
-    local def = self:speciesDef(mon)
-    local types = (def and def.types) or mon.types or {}
-    if not isGroundedForHazards(mon, true, types) then return end
-    -- Magic Guard, real Showdown rule, fixed 2026-08-28 -- same real
-    -- predicate the Stealth Rock/Sharp Steel blocks above use.
-    local magicGuardBlocksHazard = mod.exports.magicGuardBlocksHazard
-    if magicGuardBlocksHazard and magicGuardBlocksHazard(mon) then return end
-    local maxHp = mon.maxHp or (mon.stats and mon.stats.hp) or 8
-    local fraction = SPIKES_DAMAGE_24THS[layers] or SPIKES_DAMAGE_24THS[3]
-    local damage = math.max(1, math.floor(fraction * maxHp / 24))
-    mon.hp = math.max(0, mon.hp - damage)
-    self:emit({ kind = "message",
-      text = self:monName(mon) .. " is hurt by SPIKES!" })
-    self:emit({ kind = "damage", side = side, amount = damage, hp = mon.hp,
-      anim = false })
+  if Battle2 then
+    function Battle2:spikesDamage(mon)
+      local side = self:sideOf(mon)
+      local layers = self.spikes[side] or 0
+      if layers <= 0 or (mon.hp or 0) <= 0 then return end
+      local def = self:speciesDef(mon)
+      local types = (def and def.types) or mon.types or {}
+      if not isGroundedForHazards(mon, true, types) then return end
+      -- Magic Guard, real Showdown rule, fixed 2026-08-28 -- same real
+      -- predicate the Stealth Rock/Sharp Steel blocks above use.
+      local magicGuardBlocksHazard = mod.exports.magicGuardBlocksHazard
+      if magicGuardBlocksHazard and magicGuardBlocksHazard(mon) then return end
+      local maxHp = mon.maxHp or (mon.stats and mon.stats.hp) or 8
+      local fraction = SPIKES_DAMAGE_24THS[layers] or SPIKES_DAMAGE_24THS[3]
+      local damage = math.max(1, math.floor(fraction * maxHp / 24))
+      mon.hp = math.max(0, mon.hp - damage)
+      self:emit({ kind = "message",
+        text = self:monName(mon) .. " is hurt by SPIKES!" })
+      self:emit({ kind = "damage", side = side, amount = damage, hp = mon.hp,
+        anim = false })
+    end
   end
 
   ------------------------------------------------------------------

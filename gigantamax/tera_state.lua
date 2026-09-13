@@ -19,12 +19,14 @@
 -- -- this is the seam battle_forms itself documents as its per-mon
 -- override. Per explicit user instruction ("battle forms should only keep
 -- that dev power when enabled... everything else of tera is to be owned
--- by g9-battle-engine-beta"), battle_forms' TERA TYPE option no longer
--- overrides anything by default: it is forced to AUTO by ensureBattleFormsGate
--- (below) unless this mod's bf_tera_dev option is ON, and every active
--- battler is pre-stamped (modern_tera's ensureTeraStamps) so the
--- DVs-derived fallback is unreachable too -- battle_forms only reports
--- WHEN tera triggers; WHAT type deploys is always this mod's answer.
+-- by g9-battle-engine"), battle_forms' TERA TYPE option never
+-- overrides anything: it is ALWAYS forced to AUTO by
+-- ensureBattleFormsGate (below), and every active battler is pre-stamped
+-- (modern_tera's ensureTeraStamps) so the DVs-derived fallback is
+-- unreachable too -- battle_forms only reports WHEN tera triggers; WHAT
+-- type deploys is always this mod's answer. Round 104 (2026-09-10)
+-- removed the bf_tera_dev escape hatch that used to let battle_forms'
+-- dev choice win while it was ON; the gate is now unconditional.
 -- battle_forms' own activation flow (menu cell, once-per-battle registry
 -- slot) is otherwise untouched. This file owns the STORED VALUE and now
 -- the type battle_forms deploys; it still never decides when/how a
@@ -193,20 +195,19 @@ return function(mod)
   -- forms should only keep that dev power when enabled, battle forms
   -- shouldn't have any control over tera system, we only rely on it to read
   -- when tera is triggered, everything else of tera is to be owned by
-  -- g9-battle-engine-beta." battle_forms' own TERA TYPE manager option is its
+  -- g9-battle-engine." battle_forms' own TERA TYPE manager option is its
   -- dev/test tool -- src/tera.lua reads it live at every activation via its
   -- deps.chosen() = mod.options:get("tera_type") and, when it is a concrete
   -- type, it overrides every Pokemon regardless of our stamp. This wraps that
   -- read on the battle_forms mod object itself (mod.find -- the same seam its
-  -- documented per-mon stamp is) so that, while this mod's bf_tera_dev option
-  -- is OFF (the default), battle_forms' tera_type read is forced to "auto":
-  -- its dev choice can never override, and the stamp mirror above is the only
-  -- thing battle_forms can see -- our stored type is the type it deploys. It
-  -- only reports WHEN Terastallization triggers (mod.battle_forms.tera_applied)
-  -- and mechanically writes the type we already decided. Setting bf_tera_dev
-  -- ON re-enables battle_forms' original dev tool (a deliberate, explicit
-  -- global override for testing a matchup) -- that is the "only when enabled"
-  -- part. The wrap is idempotent and pcall-guarded end to end: battle_forms
+  -- documented per-mon stamp is) so that battle_forms' tera_type read is
+  -- ALWAYS forced to "auto": its dev choice can never override, and the stamp
+  -- mirror above is the only thing battle_forms can see -- our stored type is
+  -- the type it deploys. It only reports WHEN Terastallization triggers
+  -- (mod.battle_forms.tera_applied) and mechanically writes the type we
+  -- already decided. (Round 104, 2026-09-10: the bf_tera_dev option that used
+  -- to re-open battle_forms' dev tool while ON was removed -- the gate is now
+  -- unconditional.) The wrap is idempotent and pcall-guarded end to end: battle_forms
   -- is an optional dependency that may boot before OR after us, so this is
   -- also re-ensured by modern_tera on every battle.started and on the
   -- tera_applied event (by which point battle_forms is certainly loaded); an
@@ -226,16 +227,10 @@ return function(mod)
     options[BF_GATE_MARK] = true
     local origGet = options.get
     options.get = function(self, key, ...)
-      if key == "tera_type" then
-        local dev
-        local got = pcall(function()
-          dev = mod.options and mod.options.get and mod.options:get("bf_tera_dev")
-        end)
-        if not got or dev ~= "true" then return "auto" end
-      end
+      if key == "tera_type" then return "auto" end
       return origGet(self, key, ...)
     end
-    mod.log:info("galar_gmax_dex: tera_state: battle_forms TERA TYPE dev option gated (forced AUTO unless bf_tera_dev=ON) -- battle_forms now only reports WHEN tera triggers")
+    mod.log:info("galar_gmax_dex: tera_state: battle_forms TERA TYPE option forced to AUTO (unconditional) -- battle_forms only reports WHEN tera triggers")
     return true
   end
   mod.exports.ensureBattleFormsGate()

@@ -112,5 +112,5 @@ return function(mod, data)
     end
   end)
 
-  mod.log:info("g9-battle-engine-beta: status_cure installed (SHEDSKIN, HYDRATION, NATURALCURE, HEALER)")
+  mod.log:info("g9-battle-engine: status_cure installed (SHEDSKIN, HYDRATION, NATURALCURE, HEALER)")
 end

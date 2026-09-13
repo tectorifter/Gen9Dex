@@ -20,7 +20,11 @@
 -- the list at once here, with no interstitial "no will to fight"-style
 -- line, instead of native's own timed message first.
 return function(mod)
-  local BattleState = require("src.ui.gen2.BattleState")
+  local gen2Ok_BattleState, BattleState = pcall(require, "src.ui.gen2.BattleState")
+  if not gen2Ok_BattleState then
+    mod.log:info("g9-battle-engine: switch_vanilla_bridge requires Gen 2; skipped on this Gen 1 game")
+    return
+  end
   local Screens = require("src.ui.Screens")
 
   local function openVoluntarySwitchMenu(self)
@@ -62,5 +66,5 @@ return function(mod)
     return vanillaAdvanceQueue(self)
   end
 
-  mod.log:info("g9-battle-engine-beta: switch_vanilla_bridge installed (switch-request -> real party pick -> Battle:switch)")
+  mod.log:info("g9-battle-engine: switch_vanilla_bridge installed (switch-request -> real party pick -> Battle:switch)")
 end

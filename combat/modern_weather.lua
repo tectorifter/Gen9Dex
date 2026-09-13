@@ -149,13 +149,14 @@ return function(mod)
         if not canSetWeather(n.battle, false, n.user) then
           return { romText(n.battle.data, "_ButItFailedText", "But, it failed!") }
         end
-        -- Gen 1 has no held-item concept in this engine at all (confirmed,
-        -- modern_items.lua's own itemOf helper: `gen2 and who.item or nil`
-        -- -- Gen 1's own battler wrapper has no .item field to read safely)
-        -- -- gated here rather than inside resolveFieldDuration itself, so
-        -- that shared primitive stays engine-agnostic and a Gen 1 call
-        -- never risks reading an unrelated field off the wrapper.
-        local turns = resolveFieldDuration(n.gen2 and n.user or nil,
+        -- Round 99: the setter is passed on BOTH generations now. Round 98
+        -- gave Gen 1 a real held-item save slot, and field_duration.lua's
+        -- resolveFieldDuration resolves it itself (its setterItem reads the
+        -- native `.item` first for Gen 2, then falls back to the saved slot),
+        -- so a Gen-1 Damp Rock/Heat Rock/Smooth Rock/Icy Rock stretches SET
+        -- weather 5 -> 8 turns exactly like Gen 2. The wrapper is safe to
+        -- pass: setterItem unwraps `.mon` before it ever reads a field.
+        local turns = resolveFieldDuration(n.user,
           FIELD_BASE_TURNS, FIELD_EXTENDED_TURNS, WEATHER_EXTEND_ITEM[key])
         setWeather(n.battle, n.gen2, key, turns, n.user)
         return { Strings(startText) }
@@ -216,7 +217,7 @@ return function(mod)
   -- (SUN_SKIPS_CHARGE above) -- Gen 2 Solar Beam now genuinely charges
   -- for 2 turns even in sun, a real, smaller, separately-flagged gap,
   -- not silently dropped.
-  require("src.battle.gen2.Effects").CHARGE.GALAR_SOLARBEAM_EFFECT = { text = "%s took in sunlight!" }
+  do local ok, E = pcall(require, "src.battle.gen2.Effects"); if ok and E then E.CHARGE.GALAR_SOLARBEAM_EFFECT = { text = "%s took in sunlight!" } end end
 
   ------------------------------------------------------------------
   -- Solar Beam's real Sun skip-the-charge-turn. No sanctioned hook
@@ -233,7 +234,13 @@ return function(mod)
   -- ordinary hit -- exactly "skip the charge turn, hit immediately".
   -- Gen 1 only (isGen2Battle guard) -- see file header for Gen 2.
   ------------------------------------------------------------------
-  local SUN_SKIPS_CHARGE = { SOLARBEAM = true }
+  -- Phase 17 (combat/modern_charge_moves.lua): Solar Blade shares Solar
+  -- Beam's exact real sun rule (Showdown moves.ts:17261's own
+  -- `['sunnyday','desolateland'].includes(attacker.effectiveWeather())`),
+  -- so it rides the identical skip here rather than a second wrap of
+  -- performMove. The same documented Gen 2 limitation applies (the skip
+  -- is Gen 1 only; Gen 2 charges through its own Effects.CHARGE system).
+  local SUN_SKIPS_CHARGE = { SOLARBEAM = true, SOLARBLADE = true }
   local nativePerformMove = BattleState.performMove
   function BattleState:performMove(user, target, moveInst, isCalled)
     -- Mega Sol (Phase 8, other bucket): real text is "can use its moves

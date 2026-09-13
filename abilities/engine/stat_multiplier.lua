@@ -33,7 +33,8 @@ return function(mod, data)
       and requestAdjacency,
     "stat_multiplier: modern_combat.lua, status_immunity.lua, and move_targeting.lua must load first")
 
-  local Battle = require("src.battle.gen2.Battle")
+  local gen2BattleOk, Battle = pcall(require, "src.battle.gen2.Battle")
+  Battle = gen2BattleOk and Battle or nil
 
   -- national_dex's own stat spelling -> Battle:battleStat's own key
   -- convention (confirmed by direct read of gen2/Battle.lua -- distinct
@@ -54,7 +55,23 @@ return function(mod, data)
     CHLOROPHYLL = "SUN", SWIFTSWIM = "RAIN", SANDRUSH = "SAND", SLUSHRUSH = "SNOW",
     SOLARPOWER = "SUN", ORICHALCUMPULSE = "SUN",
   }
-  local TERRAIN_COND = { SURGESURFER = "ELECTRIC", GRASSPELT = "GRASSY" }
+  local TERRAIN_COND = { SURGESURFER = "ELECTRIC", GRASSPELT = "GRASSY", HADRONENGINE = "ELECTRIC" }
+
+  -- Showdown-truth factor overrides. The generated national_dex data
+  -- disagrees with Showdown on the two "also boosts a stat while its
+  -- weather/terrain is up" signature abilities: it carries ORICHALCUMPULSE
+  -- at 1.5 and HADRONENGINE at 1.3, but both really use 4/3 -- Showdown
+  -- chainModify([5461, 4096]) (orichalcumpulse abilities.ts:3088-3100,
+  -- hadronengine abilities.ts:1782-1792), and Bulbapedia independently
+  -- states 33% for both. Showdown is this project's stated ground truth, so
+  -- its real fraction wins here -- the same documented-exception discipline
+  -- this engine's own header already applies to the empty conditional
+  -- `when` fields. Keyed by ability id; only ever consulted for a matching
+  -- stat_multiplier effect, so a future dex correction needs no other change.
+  local FACTOR_OVERRIDE = {
+    ORICHALCUMPULSE = 5461 / 4096,
+    HADRONENGINE = 5461 / 4096,
+  }
   local HP_HALF_COND = { DEFEATIST = true }
   local STATUS_COND = { FLAREBOOST = "burn", TOXICBOOST = "poison" }
   local ANY_STATUS_COND = { QUICKFEET = true, GUTS = true, MARVELSCALE = true }
@@ -116,7 +133,7 @@ return function(mod, data)
       if eff.kind == "stat_multiplier" and eff.factor
           and STAT_TO_BATTLESTAT_KEY[eff.stat] == battleStatKey
           and conditionMet(battle, mon, id, gen2) then
-        mult = mult * eff.factor
+        mult = mult * (FACTOR_OVERRIDE[id] or eff.factor)
       end
     end
     return mult
@@ -200,16 +217,25 @@ return function(mod, data)
   -- math.floor(x + 0.5)) -- matched here rather than a bare floor, so a
   -- x1.5/x1.25-shaped boost rounds the same way the rest of this mod
   -- already does.
-  local nativeBattleStat = Battle.battleStat
-  nativeBattleStatFwd = function(battle, mon, key) return nativeBattleStat(battle, mon, key) end
-  function Battle:battleStat(mon, key)
-    local value = nativeBattleStat(self, mon, key)
-    local mult = statMultiplierFor(self, mon, key) * protoQuarkBoost(self, mon, key)
-    if mult ~= 1 then
-      value = math.floor(value * mult + 0.5)
+  if Battle then
+    local nativeBattleStat = Battle.battleStat
+    nativeBattleStatFwd = function(battle, mon, key) return nativeBattleStat(battle, mon, key) end
+    function Battle:battleStat(mon, key)
+      local value = nativeBattleStat(self, mon, key)
+      local mult = statMultiplierFor(self, mon, key) * protoQuarkBoost(self, mon, key)
+      if mult ~= 1 then
+        value = math.floor(value * mult + 0.5)
+      end
+      return value
     end
-    return value
+  else
+    -- Gen 1 has no Battle:battleStat -- protoQuarkBoost's own raw-stat
+    -- scan (if ever reached here) reads the battler/mon's own stat table.
+    nativeBattleStatFwd = function(battle, mon, key)
+      local stats = (mon and (mon.stats or (mon.mon and mon.mon.stats))) or {}
+      return stats[key] or 1
+    end
   end
 
-  mod.log:info("g9-battle-engine-beta: stat_multiplier installed (21 abilities: CHLOROPHYLL, SWIFTSWIM, SANDRUSH, SLUSHRUSH, SOLARPOWER, SURGESURFER, DEFEATIST, FLAREBOOST, TOXICBOOST, ORICHALCUMPULSE, HUGEPOWER, PUREPOWER, GORILLATACTICS, QUICKFEET, PROTOSYNTHESIS, QUARKDRIVE, GUTS, MARVELSCALE, GRASSPELT, MINUS, PLUS)")
+  mod.log:info("g9-battle-engine: stat_multiplier installed (22 abilities: CHLOROPHYLL, SWIFTSWIM, SANDRUSH, SLUSHRUSH, SOLARPOWER, SURGESURFER, DEFEATIST, FLAREBOOST, TOXICBOOST, ORICHALCUMPULSE, HADRONENGINE, HUGEPOWER, PUREPOWER, GORILLATACTICS, QUICKFEET, PROTOSYNTHESIS, QUARKDRIVE, GUTS, MARVELSCALE, GRASSPELT, MINUS, PLUS)")
 end

@@ -19,11 +19,11 @@
 --     work, not a live-data read. (FLASHFIRE was UN-DEFERRED 2026-09-07:
 --     its immunity half is built in absorb.lua, and its charge-boost
 --     half here -- the charge flag it sets is read by this file.)
---   Sheer Force's OWN secondary-suppression half -- its damage half IS
---     built (below); removing the move's actual secondary effect needs
---     touching every secondary-effect application site in this mod, a
---     separate, more invasive task. See the engine file's own header on
---     "sheer_force_damage_half" for the precise, honest gap.
+--   Sheer Force's own secondary-suppression half -- BUILT (main.lua's
+--     generic secondary listener nils the flinch/confuse/ailment/stat
+--     pool for a Sheer Force attacker); its damage half IS built too
+--     (this file, below). See the engine file's own
+--     "sheer_force_damage_half" comment for the split.
 --   Hustle's own accuracy half (0.8x on physical moves) -- its damage
 --     half IS built; the accuracy half needs an accuracy-modifier chain
 --     this mod doesn't have (Phase 6: accuracy_multiplier).

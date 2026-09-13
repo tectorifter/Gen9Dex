@@ -264,7 +264,7 @@ return function(mod, data)
     end
   end
 
-  mod.log:info("g9-battle-engine-beta: hit_taken installed (STAMINA, WATERCOMPACTION, "
+  mod.log:info("g9-battle-engine: hit_taken installed (STAMINA, WATERCOMPACTION, "
     .. "STEAMENGINE, JUSTIFIED, RATTLED, ANGERPOINT, WEAKARMOR, STEADFAST, BERSERK, "
     .. "ANGERSHELL, COTTONDOWN, GOOEY, TANGLINGHAIR, SANDSPIT, SEEDSOWER)")
 end
