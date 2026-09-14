@@ -377,13 +377,40 @@ return function(mod)
   --
   -- Rather than depend on a scene emitting an event it may never emit, scope
   -- this state to the battle HERE: the first time this query sees a given mon
-  -- in a NEW battle, clear every per-battle field it reads. Cheap (one table
-  -- identity compare per call) and it can never wipe state mid-battle, since
-  -- within a battle `mon.__g9UsabilityBattle` already equals `battle`.
+  -- in a NEW battle, clear every per-battle field it reads. Cheap (one number
+  -- compare per call) and it can never wipe state mid-battle, since within a
+  -- battle `mon.__g9UsabilityBattle` already equals this battle's id.
+  --
+  -- ROUND 113 -- the marker must NOT be the battle TABLE itself. `m` here is
+  -- the RAW party mon -- the exact table SaveSerializer walks as save.party --
+  -- so writing the live battle onto it leaked the whole battle object into the
+  -- save: mon -> battle -> battle.party (== save.party) -> mon is a cycle, and
+  -- battle.__g9ChosenMoves (combat/turn_order.lua) is keyed BY mon tables.
+  -- Saving after ANY battle therefore died inside SaveSerializer's writer --
+  -- infinite recursion ("stack overflow") on Gen 1, or its key sort reaching
+  -- two table keys ("attempt to compare two table values") on Gen 2 once two
+  -- actors had chosen a move. A plain, monotonically-assigned number carries
+  -- the identical "is this the same battle?" answer and serializes as a
+  -- number, so nothing battle-scoped ever reaches the save. Self-healing for
+  -- any mon still holding a stale table marker from an older build: a table
+  -- never equals a number, so the next query overwrites it.
   -- --------------------------------------------------------------------------
+  local battleIds = setmetatable({}, { __mode = "k" })
+  local lastBattleId = 0
+  local function battleIdOf(battle)
+    local id = battleIds[battle]
+    if not id then
+      lastBattleId = lastBattleId + 1
+      id = lastBattleId
+      battleIds[battle] = id
+    end
+    return id
+  end
+
   local function scopeToBattle(m, battle)
-    if m.__g9UsabilityBattle == battle then return end
-    m.__g9UsabilityBattle = battle
+    local id = battleIdOf(battle)
+    if m.__g9UsabilityBattle == id then return end
+    m.__g9UsabilityBattle = id
     m.__g9MoveActions = nil
     m.__g9LostFocus = nil
     m.ggdChoiceLockedMove = nil
