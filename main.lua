@@ -1399,9 +1399,16 @@ return function(mod)
 
   boot("move_name_display", function() return installMoveNameDisplay(mod) end)
 
-  -- Modern stats display screens (UI; guarded).
-  boot("modern_stats_screen", function() return loadSibling("stats/modern_stats_screen.lua")(mod) end)
+  -- Stats display screen (UI; guarded).  The wide 256x144 two-column party
+  -- STATS takeover (stats/modern_stats_screen.lua) was REMOVED in round 189.
+  -- It wrapped "ui.party.submenu" and repointed the party menu's STATS action
+  -- at itself, which shadowed the game's native party summary screen -- so
+  -- nothing that replaces the summary (g9-gui) could ever be reached.  STATS
+  -- is left completely alone now and opens the native party summary.
+  -- adv_stats (Adv.Stats) is this mod's in-party-menu stats reader and is
+  -- unaffected.
   boot("dev_stats_screen", function() return loadSibling("stats/dev_stats_screen.lua")(mod) end)
+  boot("train_screen", function() return loadSibling("stats/train_screen.lua")(mod) end)
 
   -- --------------------------------------------------------------------------
   -- Phase B: the combat core (canonical order).
@@ -1947,23 +1954,12 @@ return function(mod)
   -- / cancelBattleChoice).
   boot("battle_prompt", function() return loadSibling("combat/battle_prompt.lua")(mod) end)
 
-  -- Debug options screen (G9 DEX entry in the mod list).
+  -- Debug options screen: defines this mod's options schema. The screen is
+  -- reached from the engine's own mod manager (mods list -> this mod -> options).
+  -- Round 199 removed the START-menu debug row that used to be inserted here.
   boot("debug_options", function()
     local schema = loadSibling("options.lua")
     mod.options:define(schema)
-    mod.hooks:wrap("ui.start_menu.items", function(next, game, items)
-      items = next(game, items) or items
-      table.insert(items, {
-        label = "G9 DEX",
-        onSelect = function()
-          local ManagerState = require("src.mods.ManagerState")
-          local state = ManagerState.new(game)
-          game.stack:push(state)
-          state:openOptions({ id = mod.id })
-        end,
-      })
-      return items
-    end)
   end)
 
   -- --------------------------------------------------------------------------
@@ -2032,6 +2028,22 @@ return function(mod)
       end
     end
     return ledger
+  end)
+
+  -- --------------------------------------------------------------------------
+  -- Phase G (round 179): Transform / Imposter / Illusion, then the
+  -- universal move-effect guard. modern_transform MUST boot before the
+  -- guard: it patches BattleState:effectRecord for TRANSFORM_EFFECT, and
+  -- the guard (loaded last) captures that patched lookup as its native and
+  -- wraps it once more -- so the transformed record's run gets the guard's
+  -- nil/error normalization as the outermost layer, and every other
+  -- effect record gets it directly. See each file's own header.
+  -- --------------------------------------------------------------------------
+  boot("modern_transform", function()
+    return loadSibling("combat/modern_transform.lua")(mod)
+  end)
+  boot("modern_effect_guard", function()
+    return loadSibling("combat/modern_effect_guard.lua")(mod)
   end)
 
   -- --------------------------------------------------------------------------
