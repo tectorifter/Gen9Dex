@@ -635,6 +635,18 @@ function ModernStats.recalcAll(speciesDef, mon)
   -- (which may see this mon later, e.g. from a screen or save scrub) never
   -- re-derives over genuinely current numbers.
   mon.g9ModernStatRevision = MODERN_STAT_REVISION
+  -- And stamp the mon as MODERN-OWNED: this function is the one place that
+  -- writes the whole stat block from the modern model (hp/atk/def/spe under
+  -- the native names, plus spa/spd), so any mon that has been through it must
+  -- NOT be silently re-typed by a native recompute (Gen 2's Mon.refreshStats
+  -- rebuilds hp/atk/def/spe from dvs/statExp on every party-menu open). The
+  -- Gen 2 refreshStats wrapper in stats/train_screen.lua re-applies the modern
+  -- block for a modern-owned mon, which is what keeps a center-heal's modern
+  -- max HP from being replaced by a DV-derived one that differs by a point --
+  -- the reported "healed mon sits at max - 1" bug. Deliberately set HERE and
+  -- not in .ensure(): save_scrub.lua runs .ensure on every mon in a loaded
+  -- save (fill-only), which must not be treated as modern ownership.
+  mon.g9ModernOwned = true
   return mon
 end
 

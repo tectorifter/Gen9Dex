@@ -202,6 +202,10 @@ return function(mod, data, igData)
     end
   end
 
+  -- Round 338: let Transform/Imposter re-run exactly this per-mon effect for
+  -- the ability it just copied (see ability_dispatch's own registry header).
+  mod.exports.registerSwitchInAbility(applySwitchInAbility)
+
   mod.events:on("battle.started", function(ev)
     local battle = ev and ev.battle
     if not battle then return end

@@ -61,6 +61,10 @@ return function(mod)
     local oldHp = math.max(0, math.min(mon.hp or 0, oldMax))
     local missing = math.max(0, oldMax - oldHp)
     ModernStats.recalcAll(def, mon)
+    -- Keep Gen 1's five-key native block complete (and current) so the
+    -- engine's own Stats.ensure never treats it as unfinished and rebuilds it
+    -- from dvs -- see ModernStats.recalcAll's g9ModernOwned note.
+    mon.stats.special = mon.stats.spa
     if oldHp <= 0 then
       mon.hp = 0
     else

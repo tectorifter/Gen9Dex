@@ -76,9 +76,26 @@ return function(mod)
   -- adjacent enemy and there are no allies to report at all. Correct
   -- degradation, not a guess: an all-other-pokemon/all-opponents move in
   -- a 1v1 fight really does only ever have the one enemy to hit.
+  local function rawSide(b)
+    if b == nil then return nil end
+    return b.mon or b
+  end
   local function nativeFallbackAdjacency(battle, caster)
-    local enemy = (caster == battle.player) and battle.enemy or battle.player
-    return { allies = {}, enemies = { enemy } }
+    -- Gen 1 battlers are wrappers around a raw mon (`battle.player.mon`),
+    -- while Gen 2's battlers ARE the raw mon, and a battle-scene mod's own
+    -- g9.request_adjacency always answers with RAW mons (`battler.mon`). This
+    -- fallback therefore answers raw mons too, and matches the caster in
+    -- either form -- otherwise `allActiveBattlers`, the switch-in/ally-scope
+    -- ability seam (which hands engines raw mons and guards on `.hp`), and
+    -- `resolveMoveTargets` (whose Gen-1 consumers pass their targets straight
+    -- into `battle:useMove` and read `.hp`) would each receive a wrapper that
+    -- carries neither `.hp` nor `.ability`.
+    local playerMon = rawSide(battle.player)
+    local casterMon = rawSide(caster)
+    if caster == battle.player or caster == playerMon or casterMon == playerMon then
+      return { allies = {}, enemies = { rawSide(battle.enemy) } }
+    end
+    return { allies = {}, enemies = { rawSide(battle.player) } }
   end
 
   -- requestAdjacency(battle, caster, moveId) -> { allies = {...}, enemies = {...} }

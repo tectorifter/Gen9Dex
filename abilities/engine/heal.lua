@@ -185,6 +185,9 @@ return function(mod, data)
     end
   end
 
+  -- Round 338: Transform/Imposter re-run this for the ability it copied.
+  mod.exports.registerSwitchInAbility(applyHospitality)
+
   local function regeneratorFraction(mon)
     local id = abilityIdOf(mon)
     if id ~= "REGENERATOR" or not data.REGENERATOR then return nil end

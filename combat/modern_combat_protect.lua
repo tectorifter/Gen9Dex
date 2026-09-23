@@ -48,6 +48,34 @@
 -- separate, already-explained design choice this fix doesn't revisit; only
 -- the dispatch/messaging plumbing was actually broken.
 --
+-- Turn-scoping and roster-wide clearing (2026-09-10, direct user report --
+-- "protect is protecting despite failing"). The two block flags were only
+-- ever cleared by Part C's battle.turn_started listener, and that listener
+-- touched only battle.player/battle.enemy -- so in a multi-battler battle
+-- (g9-Battle-Scene's doubles/triples/boss rosters) any OTHER battler kept
+-- `protected`/`maxGuarded` set forever, and a mon whose Protect FAILED was
+-- still shielded by the stale flag it had earned on an earlier turn (the
+-- reported symptom exactly). Each flag is now stamped with the turn it was
+-- raised and only counts while that stamp matches the live turn, both
+-- run() handlers drop the user's flags BEFORE rolling (so a failed roll
+-- leaves the user provably unprotected), and Part C clears the whole
+-- active roster via mod.exports.allActiveBattlers rather than the lead
+-- pair. See clearProtection/raiseProtection/protectionOf below.
+--
+-- Status-effect coverage (same report, second request -- "make sure that
+-- protect also blocks status moves effects"). Part D's Gen 2 record swap
+-- used to substitute only kind=="primary"/"secondary" records, so a
+-- power-0 move whose effect record is kind=="full" slipped through
+-- entirely: the Counter/Mirror Coat/Metal Burst family (a full record
+-- carrying its own run) and the bare full markers the fixed-damage moves
+-- use (Seismic Toss, Night Shade, Sonic Boom, Dragon Rage, Super Fang --
+-- these reach the native fixedDamage arm, which never calls battle.damage,
+-- so Part B never saw them either). The swap now replaces the move's own
+-- record whatever its kind, and both Part B and Part D additionally refuse
+-- only moves whose national_dex target actually aims at the shielded
+-- battler (targetsBattler below) so field/side archetypes -- Spikes,
+-- Reflect, Trick Room, weather -- are never wrongly blocked.
+--
 -- Part B: blocking an INCOMING damaging move against a protected target.
 --
 -- Wraps battle.damage (the same hook modern_combat.lua already uses) at a
@@ -177,6 +205,93 @@ return function(mod)
     if battle.roller then return battle:roller()(x) == 0 end
     return battle.rng(1, x) == 1
   end
+
+  ------------------------------------------------------------------
+  -- Turn-scoped protection flags (2026-09-10). Every block path reads
+  -- through protectionOf instead of the raw flag, so a flag can only
+  -- ever answer the turn it was raised on -- the fix for the reported
+  -- "protect is protecting despite failing". clearProtection drops
+  -- everything a battler can carry (the block flags, their turn stamps,
+  -- the shield id and the contact-rider de-dupe table), and is used both
+  -- by Part C at turn start and by the run() handlers before they roll.
+  ------------------------------------------------------------------
+  local function clearProtection(who)
+    if not who then return end
+    who.protected = nil
+    who.maxGuarded = nil
+    who.protectShield = nil
+    who.protectTurn = nil
+    who.guardTurn = nil
+    who.protectRiderKeys = nil
+  end
+
+  local function raiseProtection(battle, who, kind, moveId)
+    if not who then return end
+    local turn = battleTurnOf(battle)
+    if kind == "guard" then
+      who.maxGuarded = true
+      who.guardTurn = turn
+    else
+      who.protected = true
+      who.protectTurn = turn
+    end
+    who.protectShield = moveId
+  end
+
+  -- "guard" for Max Guard, "protect" for the rest of the family, nil when
+  -- the battler is not shielded THIS turn (no flag, or a flag from an
+  -- earlier turn). The stamp is the whole point: a flag Part C missed can
+  -- never answer a later move.
+  local function protectionOf(battle, who)
+    if not who then return nil end
+    local turn = battleTurnOf(battle)
+    if who.maxGuarded and who.guardTurn == turn then return "guard" end
+    if who.protected and who.protectTurn == turn then return "protect" end
+    return nil
+  end
+  mod.exports.clearProtection = clearProtection
+  mod.exports.protectionOf = protectionOf
+
+  ------------------------------------------------------------------
+  -- Target archetypes (2026-09-10). Protect only stops a move that
+  -- actually aims at the shielded battler; national_dex's own `target`
+  -- field is the source (the same field combat/move_targeting.lua and
+  -- combat/modern_side_protection.lua key off), read lazily at battle
+  -- time because the per-move view is only wanted on demand. The exempt
+  -- set is the self / ally / side / field archetypes: Spikes and Stealth
+  -- Rock ("opponents-field"), Reflect and Safeguard ("users-field"),
+  -- Trick Room and Haze ("entire-field"/"all"), and self-buffs ("user")
+  -- are never stopped by Protect in any real generation. Anything not in
+  -- this set -- the unknown/nil case included -- is treated as aimed at
+  -- the battler, so a move with no dex record keeps the old block rather
+  -- than silently losing it.
+  ------------------------------------------------------------------
+  local PROTECT_EXEMPT_TARGETS = {
+    ["user"] = true, ["ally"] = true, ["user-and-allies"] = true,
+    ["users-field"] = true, ["entire-field"] = true,
+    ["opponents-field"] = true, ["all"] = true, ["all-pokemon"] = true,
+  }
+
+  local function moveTargetOf(battle, moveId, def)
+    if def and def.target then return def.target end
+    local dex = mod.find and mod.find("national_dex")
+    local moveById = dex and dex.exports and dex.exports.moveById
+    if moveById and moveId then
+      local ok, info = pcall(moveById, moveId)
+      if ok and type(info) == "table" and info.target then return info.target end
+    end
+    return nil
+  end
+
+  local function targetsBattler(battle, moveId, def)
+    local target = moveTargetOf(battle, moveId, def)
+    if target == nil then return true end
+    return not PROTECT_EXEMPT_TARGETS[target]
+  end
+  -- Exported for the harness's own regression battery (round 281): the
+  -- block paths use it directly, and a direct unit test of the archetype
+  -- gate keeps that rule honest without standing up the whole pipeline.
+  mod.exports.protectTargetsBattler = targetsBattler
 
   ------------------------------------------------------------------
   -- Shared Protect-family "stall" chain -- the real Pokemon Showdown
@@ -391,9 +506,12 @@ return function(mod)
     run = function(a, b, c, d, e)
       local n = ctxOf(a, b, c, d, e)
       local out = {}
+      -- A fresh use always starts from nothing: if the roll below fails,
+      -- no flag -- stale or otherwise -- may be left standing. That is the
+      -- reported "protecting despite failing" fixed at its source.
+      clearProtection(n.user)
       if rollStall(n.battle, n.user) then
-        n.user.protected = true
-        n.user.protectShield = n.moveId
+        raiseProtection(n.battle, n.user, "protect", n.moveId)
         say(n, out, nameOf(n, n.user) .. " protected itself!")
       else
         out.failed = true
@@ -487,9 +605,9 @@ return function(mod)
       local n = ctxOf(a, b, c, d, e)
       mod.log:info("galar_gmax_dex: modern_combat_protect: [diag] Max Guard run() reached")
       local out = {}
+      clearProtection(n.user)
       if rollStall(n.battle, n.user) then
-        n.user.maxGuarded = true
-        n.user.protectShield = n.moveId
+        raiseProtection(n.battle, n.user, "guard", n.moveId)
         say(n, out, nameOf(n, n.user) .. " protected itself!")
       else
         out.failed = true
@@ -586,12 +704,21 @@ return function(mod)
     local target = ctx.target
     if not (target and target ~= ctx.user) then return next(ctx) end
     if ctx.move and ctx.move.bypassesProtect then return next(ctx) end
+    -- Side/field archetypes (Spikes, Reflect, Trick Room, weather) are not
+    -- stopped by Protect; only a move that aims at the shielded battler is.
+    if not targetsBattler(ctx.battle, ctx.move and ctx.move.id, ctx.move) then
+      return next(ctx)
+    end
 
-    if target.maxGuarded then
+    -- Turn-scoped: the flag only counts while it still belongs to the live
+    -- turn (protectionOf above), so a stale flag can never block.
+    local protection = protectionOf(ctx.battle, target)
+
+    if protection == "guard" then
       return 0, { crit = false, typeMult = 0 }
     end
 
-    if target.protected then
+    if protection == "protect" then
       -- Unseen Fist / Piercing Drill (Phase 8, other bucket): both real,
       -- confirmed CONTACT-move-specific bypasses of an incoming Protect
       -- (checked against the ATTACKER's own ability, the real direction
@@ -642,15 +769,27 @@ return function(mod)
   mod.events:on("battle.turn_started", function(ev)
     local battle = ev and ev.battle
     if not battle then return end
-    local function clear(who)
-      if not who then return end
-      who.protected = nil
-      who.maxGuarded = nil
-      who.protectShield = nil
-      who.protectRiderKeys = nil
+    -- Every battler, not just the native lead pair: the reported stale-flag
+    -- leak was exactly the doubles/triples/boss case where the shielding
+    -- mon was never battle.player/battle.enemy. mod.exports.allActiveBattlers
+    -- is the mod's own N-way roster (combat/move_targeting.lua); the whole
+    -- party is swept too, so a mon that switched out carrying a flag -- or
+    -- switches in later this turn -- cannot carry one back in. All of this
+    -- is belt-and-braces beside the turn stamp in protectionOf, which
+    -- neutralises any flag the sweep somehow misses.
+    local function sweep(list)
+      for _, who in ipairs(list or {}) do clearProtection(who) end
     end
-    clear(battle.player)
-    clear(battle.enemy)
+    local allActive = mod.exports.allActiveBattlers
+    if allActive then
+      local ok, list = pcall(allActive, battle)
+      if ok and type(list) == "table" then sweep(list) end
+    end
+    sweep(battle.party)
+    sweep(battle.playerParty)
+    sweep(battle.enemyParty)
+    clearProtection(battle.player)
+    clearProtection(battle.enemy)
   end)
 
   ------------------------------------------------------------------
@@ -771,31 +910,46 @@ return function(mod)
     local nativeMoveEffectRecordFor = Battle.moveEffectRecordFor
     function Battle:useMove(attacker, defender, moveId)
       local blockable = defender and defender ~= attacker
-        and (defender.protected or defender.maxGuarded)
+        and protectionOf(self, defender) ~= nil
       if not blockable then
         return nativeUseMove(self, attacker, defender, moveId)
       end
       local ok, def = pcall(function() return self:moveDef(moveId) end)
-      if not (ok and def and (def.power or 0) == 0 and not def.bypassesProtect) then
+      if not (ok and def and (def.power or 0) == 0 and not def.bypassesProtect
+              and targetsBattler(self, moveId, def)) then
+        return nativeUseMove(self, attacker, defender, moveId)
+      end
+      -- The move's OWN effect id: only this one lookup is swapped, so a
+      -- recursive useMove or another effect looked up during the call still
+      -- resolves normally.
+      local gatedEffect = def.effect
+      if gatedEffect == nil then
         return nativeUseMove(self, attacker, defender, moveId)
       end
       Battle.moveEffectRecordFor = function(data, effect)
-        local real = nativeMoveEffectRecordFor(data, effect)
-        if real and (real.kind == "primary" or real.kind == "secondary") then
-          return {
-            kind = "primary",
-            run = function(battle)
-              battle:emit({ kind = "message",
-                text = "It doesn't affect " .. battle:monName(defender) .. "..." })
-              -- A blocked status move still triggers a contact shield's
-              -- rider if it makes contact (Showdown's onTryHit fires for
-              -- any blocked move, status or damaging alike).
-              applyShieldRider(battle, attacker, defender, defender.protectShield,
-                moveId, battle.turn)
-            end,
-          }
+        if effect ~= gatedEffect then
+          return nativeMoveEffectRecordFor(data, effect)
         end
-        return real
+        -- Whatever kind the real record is -- a plain primary/secondary
+        -- status record (Thunder Wave, Toxic, Taunt), a kind="full" record
+        -- carrying its own run (Counter/Mirror Coat/Metal Burst), or a bare
+        -- kind="full" marker (Seismic Toss and the fixed-damage family,
+        -- which reach the native arm PAST this dispatch and never touch
+        -- battle.damage at all) -- it is turned aside here. Only reached for
+        -- a power-0, non-bypassing, battler-targeting move against a live
+        -- shield, so nothing Protect should let through is intercepted.
+        return {
+          kind = "primary",
+          run = function(battle)
+            battle:emit({ kind = "message",
+              text = "It doesn't affect " .. battle:monName(defender) .. "..." })
+            -- A blocked status move still triggers a contact shield's
+            -- rider if it makes contact (Showdown's onTryHit fires for
+            -- any blocked move, status or damaging alike).
+            applyShieldRider(battle, attacker, defender, defender.protectShield,
+              moveId, battleTurnOf(battle))
+          end,
+        }
       end
       local callOk, callErr = pcall(nativeUseMove, self, attacker, defender, moveId)
       Battle.moveEffectRecordFor = nativeMoveEffectRecordFor
@@ -830,11 +984,13 @@ return function(mod)
     local nativePerformMove = BattleState.performMove
     local nativeEffectRecord = BattleState.effectRecord
     function BattleState:performMove(user, target, moveInst, isCalled)
-      if not (target and target ~= user and (target.protected or target.maxGuarded)) then
+      if not (target and target ~= user and protectionOf(self, target) ~= nil) then
         return nativePerformMove(self, user, target, moveInst, isCalled)
       end
       local move = self:moveDef(moveInst)
-      if not (move and (move.power or 0) == 0 and not move.bypassesProtect) then
+      local moveId = (moveInst and moveInst.id) or (move and move.id) or moveInst
+      if not (move and (move.power or 0) == 0 and not move.bypassesProtect
+              and targetsBattler(self, moveId, move)) then
         return nativePerformMove(self, user, target, moveInst, isCalled)
       end
       local real = self:effectRecord(move.effect)

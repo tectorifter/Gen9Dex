@@ -78,6 +78,13 @@ return function(mod)
     mon.stats.spd = computed.spd
     mon.hp = computed.hp
     mon.maxHp = computed.hp
+    -- This mon's stat block now comes from the modern model, so the Gen 2
+    -- refreshStats wrapper in stats/train_screen.lua must re-apply it after
+    -- every native recompute (a native Mon.refreshStats rebuilds hp/atk/def/spe
+    -- from mon.dvs on party-menu open and battle start, and its max HP can
+    -- differ from the modern one by a point).  Matters for a caught wild mon:
+    -- without this its modern stats would silently revert to DV-derived ones.
+    mon.g9ModernOwned = true
   end
 
   -- Wild: fully random modern IVs/EVs, exactly like wild_modern_ivs.lua's

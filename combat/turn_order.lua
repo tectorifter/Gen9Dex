@@ -478,6 +478,14 @@ return function(mod)
   -- emitted. resolveTurnActionsForGen1 below remains the batch convenience
   -- wrapper over the same two primitives, so every path still runs one
   -- algorithm.
+  --
+  -- failAction (defined further down, next to the faint-redirection helpers)
+  -- is forward-declared here so the Gen-1 stepwise path below can announce a
+  -- move the battle scene already knows has no legal recipient -- see the
+  -- `action.fail` branch in resolveNextActionForGen1.  It is only ever
+  -- CALLED at runtime, by which point the assignment further down has run.
+  local failAction
+
   mod.exports.beginTurnActionsForGen1 = function(battle, actingBattlers)
     if not (battle and type(actingBattlers) == "table") then return 0 end
     local roller = battle.rng
@@ -529,12 +537,21 @@ return function(mod)
       local action = actor and actor.id
       local mon = action and action.mon
       if mon and (mon.hp or 0) > 0 then
-        local target = action.target
-        if not target or (target.hp or 0) <= 0 then
-          target = gen1AliveOpponent(battle, mon)
-        end
-        if target and (target.hp or 0) > 0 and type(battle.useMove) == "function" then
-          battle:useMove(mon, target, action.move)
+        if action.fail then
+          -- The battle scene already knows this action has no legal
+          -- recipient from THIS slot (its own positional adjacency refused
+          -- every candidate): the move is used and fails, announced and
+          -- PP-spent, at its own place in the order -- and every OTHER
+          -- action this turn still resolves.
+          failAction(battle, mon, action.move)
+        else
+          local target = action.target
+          if not target or (target.hp or 0) <= 0 then
+            target = gen1AliveOpponent(battle, mon)
+          end
+          if target and (target.hp or 0) > 0 and type(battle.useMove) == "function" then
+            battle:useMove(mon, target, action.move)
+          end
         end
         return true
       end
@@ -802,7 +819,7 @@ return function(mod)
   -- :1656-1660): the PP is charged because the move WAS used, and the
   -- announcement is kept so the player sees "used Heal Pulse!" followed by
   -- "But it failed!" rather than the action silently vanishing.
-  local function failAction(battle, caster, moveId, failText)
+  failAction = function(battle, caster, moveId, failText)
     local moveSlot = findMoveSlot(caster, moveId)
     if moveSlot and (moveSlot.pp or 0) > 0 then
       moveSlot.pp = moveSlot.pp - 1
@@ -873,7 +890,11 @@ return function(mod)
   -- isn't achievable from mod code at all -- runTurn is an unexported
   -- local closure no mod can reach into).
   mod.exports.resolveTurnActions = function(battle, actingBattlers)
-    if not (battle and type(actingBattlers) == "table") then return end
+    -- A resume call (mod.exports.resumeAfterPivot below) passes NO
+    -- actingBattlers: it re-enters with the order list a pivot self-switch
+    -- paused on, so the guard also accepts a battle carrying that pause.
+    local pivotResume = battle and battle.__g9PivotPause
+    if not (battle and (type(actingBattlers) == "table" or pivotResume)) then return end
 
     ------------------------------------------------------------------
     -- SCENE-DRIVEN TURN BOUNDARY (round sixty-six, 2026-09-12) -- the
@@ -910,7 +931,8 @@ return function(mod)
     -- double-count and a normal (non-scene) battle's battle.turn is
     -- completely untouched by this line.
     ------------------------------------------------------------------
-    battle.turn = (battle.turn or 0) + 1
+    -- (The increment itself now lives in the fresh-turn branch below, so a
+    -- PIVOT PAUSE resume -- which is the SAME round -- cannot double-count.)
 
     -- Round sixty-seven: whether THIS round was ended early by a forced
     -- switch (Roar/Whirlwind/self-switch). Native runTurn skips its whole
@@ -919,6 +941,34 @@ return function(mod)
     -- the bottom of this function mirrors that: no residuals, event still
     -- closes the round.
     local forcedSwitchHappened = false
+    -- PIVOT PAUSE resume (see the block at the loop's forcedSwitch break and
+    -- mod.exports.resumeAfterPivot): restore the exact order list the round
+    -- stopped on and point every not-yet-acted actor whose chosen target was
+    -- the mon that left at the mon the scene sent in.  Skipping the turn
+    -- increment below is the whole reason this branch exists -- it is the
+    -- SAME round continuing, not a new one.
+    local chosen, ordered, orderIndex
+    local pivotOutgoing = nil
+    if pivotResume then
+      ordered = pivotResume.ordered
+      orderIndex = pivotResume.orderIndex
+      chosen = pivotResume.chosen
+      battle.__g9PivotPause = nil
+      battle.__g9ChosenMoves = chosen
+      battle.__g9OrderedActors = ordered
+      if pivotResume.incoming then
+        for i = orderIndex + 1, #ordered do
+          local pendingEntry = ordered[i] and ordered[i].id
+          if pendingEntry and pendingEntry.target == pivotResume.outgoing then
+            pendingEntry.target = pivotResume.incoming
+          end
+        end
+      end
+      battle.forcedSwitch = nil
+      battle.__g9PendingSelfSwitch = nil
+    else
+
+    battle.turn = (battle.turn or 0) + 1
 
     -- PHASE 5: publish every actor's chosen move for the whole turn, the
     -- `battle.__g9ChosenMoves[mon] = moveId` map mod.exports.chosenMoveOf
@@ -927,7 +977,7 @@ return function(mod)
     -- target choose a damaging move?" without guessing. Cleared per-actor
     -- as each action resolves below, which is exactly Showdown's "already
     -- acted this turn -> willMove returns null" semantics.
-    local chosen = {}
+    chosen = {}
     for _, entry in ipairs(actingBattlers) do
       if entry.mon and entry.move then chosen[entry.mon] = entry.move end
     end
@@ -943,7 +993,7 @@ return function(mod)
         }
       end
     end
-    local ordered = computeTurnOrder(actors, {
+    ordered = computeTurnOrder(actors, {
       trickRoom = battle.trickRoomActive == true, -- combat/trick_room.lua sets this for real; see this file's own header
       roller = battle:roller(),
     })
@@ -956,8 +1006,9 @@ return function(mod)
     -- `while` rather than `for ... ipairs` because reordering the array
     -- mid-iteration under `ipairs` is undefined; the two `break`s in the
     -- body (forced switch) exit this `while` exactly as before.
-    local orderIndex = 0
+    orderIndex = 0
     battle.__g9OrderedActors = ordered
+    end
     while orderIndex < #ordered do
       orderIndex = orderIndex + 1
       battle.__g9OrderIndex = orderIndex
@@ -992,6 +1043,16 @@ return function(mod)
           and (blocked.flag == "choice" or blocked.flag == "banned"
             or blocked.flag == "healblock") then
         failAction(battle, entry.mon, entry.move, blocked.reason)
+      elseif (entry.mon.hp or 0) > 0 and entry.fail then
+        -- The battle scene already knows this action has no legal recipient
+        -- from its slot -- a triple-battle wing whose only live foes are
+        -- non-adjacent, so the scene's own positional adjacency offered no
+        -- candidate (battle_screen.lua's updateMoveSelect).  The move is used
+        -- and fails, announced and PP-spent, at its own place in the turn
+        -- order; every OTHER actor this turn still resolves.  The scene used
+        -- to abandon the whole selection on this case, so the two allied
+        -- slots never got to choose.
+        failAction(battle, entry.mon, entry.move)
       elseif (entry.mon.hp or 0) > 0 then
         -- Spread moves (all-opponents/all-other-pokemon: LEER, Muddy
         -- Water, Earthquake, Surf, ...) expand to EVERY adjacent target
@@ -1018,9 +1079,16 @@ return function(mod)
         for _, t in ipairs(targets) do
           if t and (t.hp or 0) > 0 then live[#live + 1] = t end
         end
-        if #live == 0 and failed then
-          -- No valid recipient and no redirect available: the move is used
-          -- (announced, PP spent) and fails.
+        if #live == 0 then
+          -- No valid recipient: the move is used (announced, PP spent) and
+          -- fails.  For a single-target action that is a chosen target which
+          -- fainted with no live adjacent foe to redirect to; for a SPREAD
+          -- action it is a move that expanded to zero live targets (Surf in
+          -- a triple with no adjacent opponent).  The spread case used to
+          -- resolve to NOTHING here -- no announce, no PP, no line -- because
+          -- the guard was `#live == 0 and failed` and the spread path never
+          -- sets `failed`.  That is the reported "spread moves can't be used
+          -- again, the mon just doesn't act".
           failAction(battle, entry.mon, entry.move)
         elseif #live > 0 then
           if #live > 1 then battle.__spreadTargetCount = #live end
@@ -1099,6 +1167,12 @@ return function(mod)
           if forced then
             forcedSwitchHappened = true
             battle.forcedSwitch = nil
+            -- The mon leaving the field.  switch_primitives.lua's
+            -- requestSwitch parks it (battle.__g9PendingSelfSwitch) so a
+            -- pivot (U-turn) and a drag (Dragon Tail) reach here alike;
+            -- the actor is only the fallback.
+            pivotOutgoing = (battle.__g9PendingSelfSwitch
+              and battle.__g9PendingSelfSwitch.mon) or entry.mon
             break
           end
         end
@@ -1109,6 +1183,37 @@ return function(mod)
       -- except the `break`ing forced-switch path, where the trailing map
       -- teardown below covers it.
       if battle.__g9ChosenMoves then battle.__g9ChosenMoves[entry.mon] = nil end
+    end
+    -- PIVOT PAUSE: a forced switch the SCENE owns (the player's own bench
+    -- pick).  g9-battle-engine cannot open a party menu, so when the paired
+    -- scene advertises `battle.__g9SceneHandlesPivotSwitch` the round stops
+    -- here -- WITHOUT tearing down the order and WITHOUT running the
+    -- end-of-turn.  The scene performs the switch, then calls
+    -- mod.exports.resumeAfterPivot, which re-enters this function, repoints
+    -- the not-yet-acted entries at the mon that came in, and finishes the
+    -- round (end-of-turn included).  A scene that does not advertise the
+    -- flag keeps the old behaviour exactly: the round ends at the switch.
+    --
+    -- This is what makes the timing work for the player: Teleport (-6) acts
+    -- last, so nothing is left pending and the switch-in is exposed only to
+    -- entry effects; U-turn acting early leaves the opponent's move pending,
+    -- and on resume it follows the SLOT to the switch-in.
+    if pivotOutgoing and battle.__g9SceneHandlesPivotSwitch then
+      if chosen then chosen[pivotOutgoing] = nil end
+      battle.__g9PivotPause = {
+        ordered = ordered, orderIndex = orderIndex, chosen = chosen,
+        -- Residual deliberately NOT skipped on the resume: the leftover
+        -- actors resolve first, and the end-of-turn weather/leftovers then
+        -- tick the field as it stands -- i.e. the mon that actually came in.
+        forcedSwitchHappened = false,
+        outgoing = pivotOutgoing,
+      }
+      battle.__g9PendingSelfSwitch = nil
+      if battle.emit then
+        battle:emit({ kind = "pivot-switch", mon = pivotOutgoing,
+          side = battle.sideOf and battle:sideOf(pivotOutgoing) or "player" })
+      end
+      return
     end
     -- The order list/cursor/chosen map are per-turn scratch; free them so
     -- a later resolveTurnActions on the same battle starts clean.
@@ -1152,6 +1257,22 @@ return function(mod)
         and (type(Runtime.wants) ~= "function" or Runtime.wants("battle.turn_ended")) then
       Runtime.emit("battle.turn_ended", { battle = battle, turn = battle.turn })
     end
+  end
+
+  -- Resume a round a pivot self-switch paused (see the PIVOT PAUSE block in
+  -- resolveTurnActions).  `incoming` is the mon the scene sent in: every
+  -- actor that had not acted yet this round and whose chosen target was the
+  -- mon that left is repointed at it, the rest of the round resolves, and the
+  -- end-of-turn runs -- all through the SAME resolver, re-entered with the
+  -- stored order list.  Returns false and does nothing when no pause is
+  -- pending (so a caller can always call it defensively).
+  mod.exports.resumeAfterPivot = function(battle, incoming, outgoing)
+    local pause = battle and battle.__g9PivotPause
+    if not pause then return false end
+    pause.incoming = incoming or pause.incoming
+    pause.outgoing = pause.outgoing or outgoing
+    mod.exports.resolveTurnActions(battle, nil)
+    return true
   end
 
   ------------------------------------------------------------------

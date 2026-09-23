@@ -345,11 +345,42 @@ return function(mod)
     }
   end
 
+  --------------------------------------------------------------------------
+  -- BIDE (combat/modern_bide.lua owns the mechanic).  While the store is
+  -- counting down the user is LOCKED: only BIDE itself may be selected
+  -- (Showdown's `onLockMove: 'bide'`; the cart's fightLockedAction, which
+  -- skips the move menu entirely).  The scene builds its own menu, so this
+  -- is the query that tells it every OTHER move is forbidden -- without it
+  -- the player could pick Tackle mid-Bide and the store would never resolve.
+  -- Gen 2 reads the engine's own volatile (the state modern_bide's run sets).
+  -- Gen 1 reads the native battler's `bideTurns` -- the field the cart's own
+  -- continueBide consumes -- reached through the scene's mon -> battler map
+  -- (native.lua's battlersByMon), which the query has because the scene hands
+  -- it the real BattleState it built.
+  --------------------------------------------------------------------------
+  local function bideGate(battle, mon, moveId, gen2)
+    if moveId == "BIDE" then return nil end
+    local active = false
+    if gen2 then
+      local vol = mon.volatile
+      active = type(vol) == "table" and vol.bideTurns ~= nil
+    else
+      local map = battle and battle.battlersByMon
+      local battler = type(map) == "table" and map[mon] or nil
+      active = battler ~= nil and battler.bideTurns ~= nil
+    end
+    if not active then return nil end
+    return {
+      flag = "volatile",
+      reason = Strings("%s is locked into %s!",
+        nameOf(battle, mon, gen2), moveNameOf(battle, "BIDE")),
+    }
+  end
+
   -- ==========================================================================
   -- THE QUERY
   -- ==========================================================================
   local gates = {}
-
   -- Registry, keyed by move id -- the same shape (and the same rationale) as
   -- combat/modern_action_order.lua's registerFailGate: the move that owns a
   -- condition owns the selection-time answer too, so the two can never drift.
@@ -430,6 +461,7 @@ return function(mod)
     local res = choiceGate(battle, m, moveId)
       or itemBanGate(battle, m, moveId)
       or healBlockGate(battle, who, moveId)
+      or bideGate(battle, m, moveId, gen2)
       or volatileGate(battle, m, moveId, gen2)
     if res then return res end
 

@@ -258,7 +258,14 @@ return function(mod)
       kind = "full",
       chooseDamage = function(ctx)
         local battle, user, target = ctx.battle, ctx.user, ctx.target
-        if target and target ~= user and target.protected
+        -- Turn-scoped read (2026-09-10): the raw flag can be stale -- the
+        -- Protect part's Part C used to clear only the lead pair, so a
+        -- non-lead battler's flag survived and blocked much later moves.
+        -- protectionOf (combat/modern_combat_protect.lua) only counts a
+        -- flag stamped with the live turn.
+        local protectionOf = mod.exports.protectionOf
+        local shielded = protectionOf and protectionOf(battle, target)
+        if target and target ~= user and shielded
             and not (ctx.move and ctx.move.bypassesProtect) then
           return nil, romText(battle.data, "_DoesntAffectMonText",
             "It doesn't affect\n%s!", ctx.displayName(target))

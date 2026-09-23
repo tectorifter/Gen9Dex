@@ -81,6 +81,13 @@ return function(mod)
       local def = ModernStats.resolveBase(mon.species, game.data.pokemon[mon.species], nd)
       if def then
         ModernStats.recalcAll(def, mon)
+        -- recalcAll writes the modern block but never Gen 1's single `special`
+        -- key, and the native Stats.ensure rebuilds the whole block from DVs
+        -- the moment one of its five Gen 1 keys is missing (a caught mon's
+        -- summary opening would silently undo the modern stats).  Mirror it,
+        -- exactly as stats/train_screen.lua's applyModern does -- this file is
+        -- Gen 1 only (the wrap is skipped when BattleState.newWild is absent).
+        mon.stats.special = mon.stats.spa
       end
     end)
     if not ok then

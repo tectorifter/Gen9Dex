@@ -211,6 +211,11 @@ return function(mod, data)
     mon.ggdCommanderDondozo = dondozo
     applyCommanderBoost(battle, mon, gen2, 1)
   end
+
+  -- Round 338: Transform/Imposter re-run these for the ability it copied.
+  mod.exports.registerSwitchInAbility(applyRksSystem)
+  mod.exports.registerSwitchInAbility(applyCommander)
+
   mod.events:on("battle.started", function(ev)
     local battle = ev and ev.battle
     if not battle then return end

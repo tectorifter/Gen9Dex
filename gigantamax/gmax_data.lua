@@ -104,8 +104,8 @@ return {
     -- system yet -- see species_data.lua), so it cannot yet actually carry
     -- two distinct Gigantamax styles with different heights/moves the way
     -- the source data models them (Single Strike vs Rapid Strike, the
-    -- same style split already simplified away in Phase 1's evolution
-    -- data). This entry uses the Single Strike Style's data; Rapid Strike
+    -- same style split already simplified away in the earlier flat
+    -- species data). This entry uses the Single Strike Style's data; Rapid Strike
     -- (height 26.0, GMAXRAPIDFLOW, and notably its own FIGHTING/WATER
     -- typing rather than base Urshifu's FIGHTING/DARK) is not represented
     -- until a real forms system exists. Both moves are still registered

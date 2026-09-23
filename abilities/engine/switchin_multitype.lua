@@ -55,6 +55,9 @@ return function(mod, data)
     setMonTypes(battle, mon, { plateType or "NORMAL" })
   end
 
+  -- Round 338: Transform/Imposter re-run this for the ability it copied.
+  mod.exports.registerSwitchInAbility(applySwitchInAbility)
+
   mod.events:on("battle.started", function(ev)
     local battle = ev and ev.battle
     if not battle then return end

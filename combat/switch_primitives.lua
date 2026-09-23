@@ -106,13 +106,19 @@ return function(mod)
   -- firstAliveBenchIndex's own plain fallback decides immediately.
   --
   -- Player side sets battle.forcedSwitch = true (real, native, public data
-  -- -- runTurn already knows how to end a round on it) and emits a real
-  -- switch-request event; the actual party pick happens later, driven by
-  -- whichever scene is running (combat/switch_vanilla_bridge.lua for
-  -- vanilla, g9-Battle-Scene's own battle_screen.lua otherwise), and is
-  -- performed with a plain Battle:switch(index)/switchMonAtSide call --
-  -- there is nothing to "resume": the round already ended the moment
-  -- forcedSwitch made runTurn return early.
+  -- -- runTurn already knows how to end a round on it), parks the leaving mon
+  -- on battle.__g9PendingSelfSwitch, and emits a real switch-request event;
+  -- the actual party pick happens later, driven by whichever scene is running
+  -- (combat/switch_vanilla_bridge.lua for vanilla, g9-Battle-Scene's own
+  -- battle_screen.lua otherwise), and is performed with a plain
+  -- Battle:switch(index)/switchMonAtSide call. For native runTurn there is
+  -- nothing to "resume" -- the round already ended the moment forcedSwitch
+  -- made runTurn return early -- but combat/turn_order.lua (the resolver a
+  -- replacement SCENE drives) reads __g9PendingSelfSwitch and, when the scene
+  -- advertises battle.__g9SceneHandlesPivotSwitch, PAUSES the round there so
+  -- the scene can perform the pick and resume the SAME round via
+  -- mod.exports.resumeAfterPivot -- that is what makes a pivot's switch-in
+  -- take the hits that were still pending (U-turn) versus none (Teleport).
   function mod.exports.requestSwitch(battle, mon, opts)
     assert(battle and mon, "requestSwitch: battle and mon are required")
     opts = opts or {}
@@ -136,6 +142,12 @@ return function(mod)
     -- bench that has nothing living, non-egg, and not already out on it.
     if not firstAliveBenchIndex(battle.party, battle.playerIndex) then return false end
 
+    -- The mon the player must replace.  combat/turn_order.lua's
+    -- resolveTurnActions reads this at the forcedSwitch break so it can tell
+    -- a pivot/drag that a mid-turn-capable scene should perform from the old
+    -- "end the round here" behaviour, and the scene is handed the same mon on
+    -- its own `pivot-switch` event.
+    battle.__g9PendingSelfSwitch = { mon = mon, side = side, reason = opts.reason }
     battle.forcedSwitch = true
     battle:emit({ kind = "switch-request", side = "player", mon = mon,
       reason = opts.reason, text = opts.text })

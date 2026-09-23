@@ -1,7 +1,7 @@
 {
   "id": "g9-battle-engine",
   "name": "g9-battle-engine",
-  "version": "4.3.3",
+  "version": "4.6.3",
   "api": 2,
   "entry": "main.lua",
   "profile": "content",
@@ -19,12 +19,13 @@
     "national_dex"
   ],
   "optional_dependencies": [
-    "battle_forms"
+    "battle_forms",
+    "g9-gui"
   ],
   "dependency_sources": {
     "national_dex": "https://github.com/sanjinpepic/gen1recomp-national-dex"
   },
-  "description": "4 gimmicks, updated battle engine -- moves/stats/gigantamax combat only, no sprites, no overworld spawns, no followers.",
+  "description": "Modern battle engine: moves, stats, gimmicks and overworld fixes.",
   "options_schema": "options.lua",
   "github": "https://github.com/tectorifter/Gen9Dex",
   "experimental": false,

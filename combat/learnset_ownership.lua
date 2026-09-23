@@ -48,7 +48,7 @@
 -- level1Moves/learnset/levelMoves/eggMoves exist) -- whatever gates TM
 -- compatibility lives elsewhere in the engine and isn't touched here; a
 -- known, stated gap, not silently assumed handled.
-return function(mod)
+return function(mod, vocab)
   local GameVersion = require("src.core.GameVersion")
   local isGen2 = GameVersion.generation(GameVersion.get()) == 2
 
@@ -129,6 +129,20 @@ return function(mod)
   local function registeredMoveId(moveId)
     local ok, live = pcall(mod.content.moves.get, mod.content.moves, moveId)
     if ok and live then return moveId end
+    -- Gen 2 first: Gold registers the cart-owned Gen 2 moves WITH separators
+    -- (METAL_CLAW, GIGA_DRAIN) while national_dex's extras spell them without
+    -- (METALCLAW, GIGADRAIN), and national_dex does not carry the cart-owned
+    -- moves at all (src/moves.lua skips any id whose normalised form the cart
+    -- already owns) -- so the strippedId reverse map below has no entry for
+    -- them and all 45 would otherwise dangle. gen2_vocab resolves a
+    -- separator-only difference against the SAME live registry, so the answer
+    -- is only ever an id the registry already holds. No-op on Gen 1 (an id
+    -- already spelled the registry's way is returned unchanged), so the
+    -- fallback is left unguarded by generation on purpose.
+    if vocab then
+      local fixed = vocab.moveId(moveId)
+      if fixed ~= moveId then return fixed end
+    end
     if registeredAlias == nil then
       registeredAlias = {}
       local listed, ids = pcall(ndExports.listMoves)

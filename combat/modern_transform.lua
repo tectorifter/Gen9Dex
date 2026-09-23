@@ -104,6 +104,39 @@
 -- real ability list contains Imposter) gets the same stat/sprite/move copy
 -- a manual Transform would give, including the gates below.
 --
+-- ROUND 338 -- THE COPIED MOVES AND THE COPIED ABILITY. Two user-reported
+-- gaps, both routed through the same temporary-copy discipline:
+--
+--   (M) MOVES. `applyTransform` wrote the target's moves only to the engine
+--       battler's `curMoves`, but a battle screen's move menu reads the RAW
+--       mon (`g9-Battle-Scene`'s `Combat.allMoves` iterates
+--       `battler.mon.moves`), and Gen 2's own move pipeline reads `mon.moves`
+--       directly -- so a transformed mon kept showing (and using) its OWN
+--       moves. The copy now lands on BOTH `battler.curMoves` and `mon.moves`,
+--       as the target's four moves with CURRENT PP = 5 and MAX PP = the
+--       respective move's own maximum (the Showdown rule: transform slots are
+--       `pp = Math.min(5, move.pp)`, `maxpp = calculatePP(move, ppUps)`;
+--       pokemon.ts:1326-1341). `snapshotTransform` records the mon's own
+--       `moves` table and `revertTransform` puts it back intact -- PP,
+--       PP-Up-increased maxima and all -- so fainting, switching out or the
+--       battle ending restores the mon's four learned moves exactly as they
+--       were (the temporary copy is never persisted into the save).
+--
+--   (A) ABILITY. Real Showdown transformInto ends with
+--       `this.setAbility(pokemon.ability, this, null, true, true)`
+--       (pokemon.ts:1352) -- the target's ability is copied for the duration
+--       of the battle. SetAbility (abilities/ability_dispatch.lua) already
+--       snapshots the mon's own natural ability and hands it back on
+--       switch-out / faint / battle end, so the copy is battle-scoped for
+--       free. And because `setAbility` with `isTransform` fires the new
+--       ability's Start event, a copied switch-in trigger (Intimidate, a
+--       weather/terrain setter, Trace, Download, ...) must activate ONCE as
+--       part of the transform; `fireSwitchInAbility` replays exactly the
+--       registered switch-in families the ordinary entry sweep runs, for
+--       this one mon, without touching the unrelated battler_switched
+--       surface (entry hazards, field re-application, ...). The same body
+--       serves Imposter (its switch-in transform).
+--
 -- TRANSFORM GATES, from the same Showdown function: fails if the target is
 -- fainted, if either side has an active illusion, or if the target is a
 -- substitute. (Showdown's substitute gate is Gen 5+, so Gen 1 allows it --
@@ -136,6 +169,84 @@ return function(mod)
     if not who then return "?" end
     local mon = who.mon or who
     return mon.nickname or (mon.def and mon.def.name) or mon.name or mon.species or "?"
+  end
+
+  ------------------------------------------------------------------
+  -- Round 338: the copied moveset.
+  ------------------------------------------------------------------
+  -- The target's move list, whichever generation's shape this battle keeps
+  -- it in: a Gen 1 battler aliases its raw mon's moves through `curMoves`,
+  -- while Gen 2's own move pipeline reads `mon.moves` directly.
+  local function sourceMovesOf(target)
+    if not target then return nil end
+    if type(target.curMoves) == "table" and #target.curMoves > 0 then
+      return target.curMoves
+    end
+    local mon = target.mon or target
+    if type(mon.moves) == "table" and #mon.moves > 0 then return mon.moves end
+    return nil
+  end
+
+  -- The MAXIMUM PP of a source move slot. Gen 2 slots carry a real `maxPp`
+  -- (Mon.movesAtLevel / Trainers.party write `moveDef.pp`); Gen 1 slots are
+  -- only `{id, pp, ppUps}` and derive the maximum from the move def plus the
+  -- PP-Up count exactly like the games do -- `def.pp + ppUps * floor(def.pp/5)`,
+  -- the same rule combat/modern_faint_sacrifice.lua reads. Showdown's own
+  -- `calculatePP(move, ppUps)` produces the identical number.
+  local function moveMaxPp(battle, slot)
+    if type(slot) ~= "table" then return 5 end
+    if slot.maxPp then return slot.maxPp end
+    local def = slot.id and battle and battle.data and battle.data.moves
+      and battle.data.moves[slot.id]
+    local base = (type(def) == "table" and def.pp) or 0
+    if base <= 0 then return slot.pp or 5 end
+    return base + (slot.ppUps or 0) * math.floor(base / 5)
+  end
+
+  -- Builds the temporary "borrowed moves" list: the target's moves, each with
+  -- current PP 5 (Showdown pokemon.ts:1326 `Math.min(5, move.pp)`) and the
+  -- move's own maximum, flagged as a mimic clone exactly like the Gen 1 ROM
+  -- copy (transform.asm's `.copyPPLoop`).
+  local function buildMoveCopy(battle, target)
+    local src = sourceMovesOf(target)
+    if not src then return nil end
+    local copy = {}
+    for i = 1, #src do
+      local mv = src[i]
+      if type(mv) == "table" and mv.id then
+        copy[#copy + 1] = {
+          id = mv.id,
+          pp = 5,
+          maxPp = moveMaxPp(battle, mv),
+          ppUps = 0,
+          mimic = true,
+        }
+      end
+    end
+    if #copy == 0 then return nil end
+    return copy
+  end
+
+  -- Copies `target`'s ability onto `user` for the rest of the battle and, when
+  -- it actually changed, fires that ability's switch-in trigger once (a real
+  -- Showdown `setAbility(..., isTransform)` fires the new ability's Start
+  -- event). Returns true when an ability was written.
+  local function copyAbility(battle, user, target)
+    local setAbility = mod.exports.setAbility
+    local fireTrigger = mod.exports.fireSwitchInAbility
+    if not (setAbility and abilityIdOf) then return false end
+    local targetId = abilityIdOf(target.mon or target)
+    if not targetId then return false end
+    local prevId = abilityIdOf(user.mon or user)
+    if setAbility(battle, user, targetId) == false then return false end
+    if fireTrigger and targetId ~= prevId then
+      local ok, err = pcall(fireTrigger, battle, user)
+      if not ok then
+        mod.log:warn("g9-battle-engine: transform ability trigger failed: %s",
+          tostring(err))
+      end
+    end
+    return true
   end
 
   ------------------------------------------------------------------
@@ -301,10 +412,18 @@ return function(mod)
     if not mon then return nil end
     if mon.__g9TransformPre then return mon.__g9TransformPre end
     local pre = {
-      battler = (user.mon and user) or nil, -- the live engine battler
+      -- Round 276: this used to hold the live engine battler
+      -- (`battler = user` when user had a `.mon`), but a battler carries a
+      -- strong `.mon` back-reference, so keeping it on the mon closed a save
+      -- cycle (on Gen 2 battle.party IS save.party and SaveSerializer's
+      -- writer has no cycle detection). Only the FACT that the caller handed
+      -- in a battler is recorded; revertTransform re-resolves it from the
+      -- battle, where the scene's reused battler is still reachable.
+      hadBattler = user.mon ~= nil,
       curStats = user.curStats,
       curTypes = user.curTypes,
       curMoves = user.curMoves,
+      monMoves = mon.moves,
       stages = user.stages,
       stagesModern = nil,
     }
@@ -339,7 +458,16 @@ return function(mod)
     if not mon then return false end
     local pre = mon.__g9TransformPre
     if not pre then return false end
-    local b = pre.battler
+    -- Round 276: the battler is re-resolved from the battle instead of being
+    -- read off the snapshot (snapshotTransform no longer stores it, so the
+    -- mon never holds a battler -> mon cycle). `who` itself is used when a
+    -- battler was handed in; otherwise battlerFor finds the scene's reused
+    -- battler via battle.battlersByMon. Only the fields a battler actually
+    -- got at snapshot time are touched, so a mon that never had a wrapper
+    -- behaves exactly as before.
+    local b = pre.hadBattler
+      and ((who.mon and who) or battlerFor(battle, mon))
+      or nil
     if b then
       b.curStats = pre.curStats
       b.curTypes = pre.curTypes
@@ -347,8 +475,14 @@ return function(mod)
       b.stages = pre.stages or {}
       b.transformed = nil
       clearDisplay(battle, b)
+    else
+      clearDisplay(battle, mon)
     end
     restoreBucket(battle, b or who, pre.stagesModern)
+    -- Round 338: the mon's own learned moves (PP, PP-Up maxima and current
+    -- values) come back exactly as snapshotted; a mon that had no moves table
+    -- gets it cleared again rather than keeping the borrowed list.
+    mon.moves = pre.monMoves
     mon.transformed = nil
     mon.__g9TransformPre = nil
     return true
@@ -432,13 +566,26 @@ return function(mod)
       for k, v in pairs(from) do to[k] = v end
     end
 
-    -- Moves: the Gen 1 ROM copy -- 5 PP each, flagged as mimic clones.
-    if target.curMoves then
-      user.curMoves = {}
-      for _, mv in ipairs(target.curMoves) do
-        user.curMoves[#user.curMoves + 1] = { id = mv.id, pp = 5, mimic = true }
-      end
+    -- Moves (round 338): the target's four moves with current PP 5 and the
+    -- move's own maximum, written to BOTH the engine battler's `curMoves` and
+    -- the raw mon's `moves` -- a battle screen's move menu reads the mon, and
+    -- Gen 2's own pipeline reads `mon.moves`, so the battler-only copy a
+    -- transformed mon used to get kept showing (and using) its OWN move list.
+    -- snapshotTransform/revertTransform put the mon's own list back intact on
+    -- every exit.
+    local moveCopy = buildMoveCopy(battle, target)
+    if moveCopy then
+      -- `curMoves` is a battler alias only (a Gen 2 raw mon must not gain one:
+      -- battle.party IS save.party there); `mon.moves` is the store every
+      -- move menu and pipeline actually reads.
+      if user.mon then user.curMoves = moveCopy end
+      local userMon = user.mon or user
+      userMon.moves = moveCopy
     end
+
+    -- Ability (round 338): copy the target's for the rest of the battle, and
+    -- fire its switch-in trigger once if it changed (see this file's header).
+    copyAbility(battle, user, target)
 
     -- The flags Quick Powder / Metal Powder read (they check
     -- mon.transformed on the raw mon; combat/modern_gen1_held_items.lua,

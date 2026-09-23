@@ -140,26 +140,108 @@ return function(mod)
   end
 
   -- ---------------------------------------------------------------------
-  -- Wiring: subscribe to the trigger and defensively clear the marker on
-  -- battle end (battle_forms emits a revert itself on teardown, but a
-  -- battle ending mid-Dynamax should never leave a stale marker behind).
+  -- Wiring: subscribe to the trigger, and keep the marker strictly
+  -- battle-scoped on every exit.
+  --
+  -- Round 290 fix (direct user report: "fakeout regression, it's not
+  -- flinching, it is a 100% flinch move"). battle_forms emits
+  -- `dynamax_reverted` on a mid-battle finish, switch-out (its resolve.lua
+  -- settle) and faint -- but NOT on every exit: its own
+  -- `forget()` (src/dynamax.lua) is bound to battle.started AND
+  -- battle.ended and clears its internal state SILENTLY, and its
+  -- battle-end sweep (src/resolve.lua) reverts forms without a
+  -- dynamax_reverted. g9-Battle-Scene also never raises `battle.fainted`
+  -- at all (confirmed: it emits battle.ended / turn_started /
+  -- battler_switched / ball_thrown / exp_gained only), so battle_forms'
+  -- onFainted teardown never runs there either. The result: a Dynamaxed
+  -- mon that faints or is benched (or was already withdrawn) when a scene
+  -- battle ends keeps `__g9Dynamaxed`. On Gen 2 a party mon IS its save
+  -- record, so the marker is WRITTEN TO THE SAVE and isDynamaxed()
+  -- reports true forever: hit_taken.setFlinched and status_immunity.
+  -- hasStatusImmunity both early-return, making the mon permanently
+  -- immune to flinch and every status -- Fake Out, a 100% flinch move,
+  -- simply stops flinching it, in that fight and every later one.
+  --
+  -- The marker is now swept like the other per-mon battle-scoped state
+  -- (modern_stat_manipulation.lua's stat baseline, ability_dispatch.lua's
+  -- ability snapshot): the WHOLE roster at battle.started -- so a save
+  -- already carrying a stale marker self-heals the next time it fights --
+  -- the leaving mon at battle.battler_switched, the fainter at
+  -- battle.fainted, and the whole roster again at battle.ended (last,
+  -- priority -1000, the same slot the ability restore uses).
   -- ---------------------------------------------------------------------
+  local function rawMon(who)
+    if type(who) ~= "table" then return nil end
+    local mon = who.mon or who
+    return type(mon) == "table" and mon or nil
+  end
+
+  -- Every mon a battle can expose, deduped by identity: the active roster
+  -- (N-way, combat/move_targeting.lua), the scene's own battlersByMon
+  -- cache, both/all party lists, and Gen 1's real save party
+  -- (battle.game.save.party). The same roster abilities/ability_dispatch
+  -- .lua's eachBattleMon walks.
+  local function clearMarkerRoster(battle)
+    if type(battle) ~= "table" then return end
+    local seen = {}
+    local function visit(who)
+      local mon = rawMon(who)
+      if not mon or seen[mon] then return end
+      seen[mon] = true
+      mon.__g9Dynamaxed = nil
+    end
+    visit(battle.player)
+    visit(battle.enemy)
+    local allActiveBattlers = mod.exports.allActiveBattlers
+    if allActiveBattlers then
+      local ok, actives = pcall(allActiveBattlers, battle)
+      if ok and type(actives) == "table" then
+        for i = 1, #actives do visit(actives[i]) end
+      end
+    end
+    local byMon = battle.battlersByMon
+    if type(byMon) == "table" then
+      for _, b in pairs(byMon) do visit(b) end
+    end
+    local parties = { battle.party, battle.playerParty, battle.enemyParty }
+    local game = battle.game
+    local saveParty = game and game.save and game.save.party
+    if type(saveParty) == "table" then parties[#parties + 1] = saveParty end
+    for p = 1, #parties do
+      local party = parties[p]
+      if type(party) == "table" then
+        for i = 1, #party do visit(party[i]) end
+      end
+    end
+  end
+  mod.exports.clearDynamaxMarkerRoster = clearMarkerRoster
+
   mod.events:on(appliedEvent, function(ev)
     handleApplied(ev)
   end)
   mod.events:on(revertedEvent, function(ev)
     handleReverted(ev)
   end)
-  mod.events:on("battle.ended", function(ev)
-    local battle = ev and ev.battle
-    if not battle then return end
-    for _, b in ipairs(mod.exports.allActiveBattlers and mod.exports.allActiveBattlers(battle) or { battle.player, battle.enemy }) do
-      local mon = b and (b.mon or b)
-      if mon then
-        mon.__g9Dynamaxed = nil
-      end
-    end
+  -- Self-heal: a stale marker from an earlier battle is gone before this
+  -- battle's first Dynamax could ever be applied (battle_forms only
+  -- activates mid-battle, through the overlay/EFFECT path -- never during
+  -- the constructor's battle.started), so this cannot clobber a live one.
+  mod.events:on("battle.started", function(ev)
+    clearMarkerRoster(ev and ev.battle)
   end)
+  mod.events:on("battle.battler_switched", function(ev)
+    if not ev then return end
+    local mon = rawMon(ev.previous)
+    if mon then mon.__g9Dynamaxed = nil end
+  end)
+  mod.events:on("battle.fainted", function(ev)
+    if not ev then return end
+    local mon = rawMon(ev.battler or ev.mon or ev.target or ev.pokemon)
+    if mon then mon.__g9Dynamaxed = nil end
+  end)
+  mod.events:on("battle.ended", function(ev)
+    clearMarkerRoster(ev and ev.battle)
+  end, -1000)
 
   mod.log:info("galar_gmax_dex: dynamax_battle installed (consumes battle_forms' "
     .. "dynamax_applied/reverted -- Dynamax Level drive; Max Move secondaries live in max_move_subeffects.lua)")

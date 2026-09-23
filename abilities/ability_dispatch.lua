@@ -191,7 +191,8 @@ return function(mod)
   -- `mon.__g9AbilityBaseline` -- along with `__g9AbilityBaselineSet`, a
   -- separate boolean guard so a mon with genuinely NO natural ability
   -- restores correctly to "no ability" instead of reading as never
-  -- captured, and `__g9AbilityBaselineBattle`, which scopes the snapshot to
+  -- captured, and `__g9AbilityBaselineBattle`, a plain NUMBER (round 276;
+  -- it used to hold the battle object itself) which scopes the snapshot to
   -- ONE battle so a stale baseline from an abandoned fight is refreshed by
   -- the next battle.started sweep. It is captured up front for the whole
   -- party and lazily here for any mon the sweep could not cover (no
@@ -207,14 +208,41 @@ return function(mod)
   -- ORIGINAL `who` (before unwrapping) so battle:sideOf still sees the
   -- battler the engine handed in; it is Gen-2-only by construction anyway
   -- (Gen 1's sideOf never compares equal to "enemy").
+  -- A battle identity that is safe to serialize: a weak-keyed map hands
+  -- every battle a monotonically-assigned number, so the scope marker left
+  -- on the mon is a number rather than the battle object. This is the SAME
+  -- scheme combat/move_usability.lua already uses for its own scope marker
+  -- (see its __g9UsabilityBattle comment): on Gen 2 battle.party IS
+  -- save.party, and the battle holds mon-keyed maps (turn_order's
+  -- battle.__g9ChosenMoves), so a battle reference on a party mon closes a
+  -- cycle the save writer cannot walk -- it has no cycle detection on the
+  -- write side and dies with a "stack overflow". nil (a setAbility call
+  -- with no battle at hand) gets the fixed id 0, which is exactly its
+  -- meaning: no battle scope. A mon still carrying a table here from an
+  -- older build reads as a different id and is simply re-captured, so the
+  -- change is self-healing.
+  local battleIds = setmetatable({}, { __mode = "k" })
+  local lastBattleId = 0
+  local function battleIdOf(battle)
+    if battle == nil then return 0 end
+    local id = battleIds[battle]
+    if not id then
+      lastBattleId = lastBattleId + 1
+      id = lastBattleId
+      battleIds[battle] = id
+    end
+    return id
+  end
+
   local function captureAbilityBaseline(mon, battle)
     if type(mon) ~= "table" then return false end
-    if mon.__g9AbilityBaselineSet and mon.__g9AbilityBaselineBattle == battle then
+    local id = battleIdOf(battle)
+    if mon.__g9AbilityBaselineSet and mon.__g9AbilityBaselineBattle == id then
       return false
     end
     mon.__g9AbilityBaseline = mon.ability
     mon.__g9AbilityBaselineSet = true
-    mon.__g9AbilityBaselineBattle = battle
+    mon.__g9AbilityBaselineBattle = id
     return true
   end
   mod.exports.captureAbilityBaseline = captureAbilityBaseline
@@ -253,6 +281,54 @@ return function(mod)
     if not (record and type(record.name) == "string" and record.name ~= "") then return false end
     mon.ability = record.name
     return newId
+  end
+
+  ------------------------------------------------------------------
+  -- On-demand switch-in ability trigger (round 338).
+  --
+  -- Every switch-in ability engine in this mod (Intimidate's stat drops and
+  -- the weather/terrain/primal setters, Trace, Download, Forewarn, Frisk,
+  -- Hospitality, RKS System, Commander, Multitype, ...) already subscribes
+  -- to battle.started + battle.battler_switched and applies its effect for
+  -- ONE mon from a local `apply...` function. Transform/Imposter needs the
+  -- EXACT same effect for the generic case (a real switch-in trigger like
+  -- Intimidate must fire once when the ability is copied), but it must NOT
+  -- drag in the whole battler_switched surface (entry hazards, weather
+  -- re-application, Ability-slot restores...), which is why re-emitting that
+  -- event is wrong.
+  --
+  -- Instead each engine registers its own per-mon apply function here, once,
+  -- at install time; fireSwitchInAbility re-runs them for a single mon. The
+  -- order is registration order (the same boot order the real switch-in
+  -- sweep uses), and every call is pcall-guarded so one misbehaving family
+  -- can never break the transform that triggered it.
+  ------------------------------------------------------------------
+  local switchInTriggers = {}
+  function mod.exports.registerSwitchInAbility(fn)
+    if type(fn) == "function" then switchInTriggers[#switchInTriggers + 1] = fn end
+    return fn
+  end
+
+  -- Runs every registered switch-in family for one mon. `who` may be a
+  -- battler wrapper or a raw mon; the engines (and the battle scene's own
+  -- g9.request_adjacency seam, which resolves the caster by `battler.mon ==
+  -- caster`) are written for the RAW mon, exactly as Gen 2 and the scene
+  -- already hand them -- so the wrapper is unwrapped here.
+  function mod.exports.fireSwitchInAbility(battle, who)
+    if not battle or not who then return 0 end
+    local mon = rawMon(who) or who
+    if type(mon) ~= "table" then return 0 end
+    local ran = 0
+    for i = 1, #switchInTriggers do
+      local ok, err = pcall(switchInTriggers[i], battle, mon)
+      if ok then
+        ran = ran + 1
+      else
+        mod.log:warn("g9-battle-engine: switch-in ability trigger %d failed: %s",
+          i, tostring(err))
+      end
+    end
+    return ran
   end
 
   ------------------------------------------------------------------

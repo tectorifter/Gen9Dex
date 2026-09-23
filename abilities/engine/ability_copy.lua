@@ -51,6 +51,10 @@ return function(mod, data)
     setAbility(battle, mon, oppId)
   end
 
+  -- Round 338: Transform/Imposter can copy TRACE itself, so its own
+  -- switch-in copy must be reachable on demand too.
+  mod.exports.registerSwitchInAbility(applyTrace)
+
   -- Same real N-way dual-trigger shape every other switch-in ability
   -- engine in this mod now uses (abilities/engine/switchin_stat_change
   -- .lua's own header): battle.started covers however many battlers led

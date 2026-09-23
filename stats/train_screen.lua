@@ -52,7 +52,10 @@
 --     .lua uses -- with the current damage carried across, so the edited
 --     numbers are what g9-battle-engine's combat reads.  A committed mon is
 --     flagged (mon.g9TrainEdited) so the NATIVE recomputes re-apply the edit
---     instead of silently undoing it:
+--     instead of silently undoing it; any mon ModernStats.recalcAll writes is
+--     flagged too (mon.g9ModernOwned), so a center heal or an EV-yield recalc
+--     survives a native refresh the same way (see the modernOwned helper in
+--     the change-preservation block below):
 --       * Gen 2: src/ui/gen2/PartyMenu.lua calls Mon.refreshStats on EVERY
 --         party-menu open and Battle.new does on every battle start, both
 --         rebuilding mon.stats from dvs/statExp -- Mon.refreshStats is wrapped
@@ -172,12 +175,27 @@ return function(mod)
   -- engine's own ev_yield_on_faint recompute: carry the missing HP across
   -- rather than healing to full, mirror the split specials into whichever key
   -- names this generation's native code reads, and keep maxHp in step on Gen 2.
-  local function applyModern(def, mon)
+  local function applyModern(def, mon, keepMax, keepHp)
     if type(mon) ~= "table" then return end
     if type(def) ~= "table" or type(def.baseStats) ~= "table" then return end
     mon.stats = mon.stats or {}
-    local oldMax = mon.stats.hp or 1
-    local oldHp = math.max(0, math.min(mon.hp or 0, oldMax))
+    -- HP is carried as how much is missing from the CURRENT max.  A caller
+    -- that recomputed the stat block underneath us -- the Gen 2 refreshStats
+    -- wrapper, where the native pass replaces mon.stats with the DV block and
+    -- can clamp mon.hp to that (smaller) native max -- passes the max/hp it
+    -- saw BEFORE the recompute (keepMax/keepHp), so the modern record is never
+    -- charged for the NATIVE max's difference.  Measuring against the
+    -- post-refresh native block instead drained (nativeMax - modernMax) HP on
+    -- EVERY Gen 2 party-menu open for an edited mon -- the reported "loses 1 HP
+    -- on every page turn" bug (ui/hp_guard.lua in g9-gui is the safety net).
+    local oldMax, oldHp
+    if type(keepMax) == "number" and type(keepHp) == "number" then
+      oldMax = keepMax
+      oldHp = math.max(0, math.min(keepHp, keepMax))
+    else
+      oldMax = mon.stats.hp or 1
+      oldHp = math.max(0, math.min(mon.hp or 0, oldMax))
+    end
     local missing = math.max(0, oldMax - oldHp)
     ModernStats.recalcAll(def, mon)
     if gen == 2 then
@@ -205,6 +223,22 @@ return function(mod)
   end
 
   -- ---------------------------------------------------- change preservation
+
+  -- A mon whose stat block is OWNED by the modern layer -- committed in the
+  -- TRAIN editor (`g9TrainEdited`, the historical flag) or written by
+  -- ModernStats.recalcAll (`g9ModernOwned`: a center heal, an EV-yield recalc,
+  -- a caught wild mon).  Every NATIVE stat recompute must re-apply the modern
+  -- block for one of these instead of letting it stand: Gen 2's
+  -- Mon.refreshStats rebuilds hp/atk/def/spe from mon.dvs on every party-menu
+  -- open and battle start, and its DV-derived max HP can differ from the
+  -- modern one by a point -- which is exactly the reported "a healed Pokemon
+  -- sits at max - 1" bug, because the heal's modern full HP survives while
+  -- the max it was measured against gets replaced.
+  local function modernOwned(mon)
+    return type(mon) == "table"
+      and (mon.g9TrainEdited or mon.g9ModernOwned)
+  end
+
   -- (1) Gen 2: re-apply after every native refreshStats.
   if gen == 2 then
     local okMon, Mon = pcall(require, "src.battle.gen2.Mon")
@@ -214,9 +248,18 @@ return function(mod)
       Mon.__g9TrainRefreshWrapped = true
       local nativeRefresh = Mon.refreshStats
       Mon.refreshStats = function(mon, data)
+        -- Snapshot the modern HP state BEFORE the native recompute replaces
+        -- mon.stats with the DV-derived block (and can clamp mon.hp to that
+        -- smaller max).  applyModern then measures the carried "missing HP"
+        -- against THESE numbers, so a party-menu open is HP-idempotent.
+        local keepMax, keepHp
+        if modernOwned(mon) then
+          keepMax = mon.maxHp or (mon.stats and mon.stats.hp)
+          keepHp = mon.hp
+        end
         local result = nativeRefresh(mon, data)
-        if type(mon) == "table" and mon.g9TrainEdited then
-          pcall(applyModern, defFromData(data, mon), mon)
+        if modernOwned(mon) then
+          pcall(applyModern, defFromData(data, mon), mon, keepMax, keepHp)
         end
         return result
       end
@@ -227,7 +270,7 @@ return function(mod)
   -- and gen2/Mon.lua raise this AFTER writing the new level's stats).
   mod.events:on("pokemon.level_up", function(ev)
     local mon = ev and ev.mon
-    if type(mon) ~= "table" or not mon.g9TrainEdited then return end
+    if not modernOwned(mon) then return end
     local ok, err = pcall(function()
       applyModern(defFromData(liveData(), mon), mon)
     end)
@@ -239,14 +282,14 @@ return function(mod)
 
   -- (3) Either generation: re-apply the whole party at battle start.  Gen 2's
   -- Battle.new refreshes stats BEFORE raising battle.started, so without this
-  -- an edited mon would fight with its DV-derived numbers.
+  -- a modern-owned mon would fight with its DV-derived numbers.
   mod.events:on("battle.started", function()
     local ok, err = pcall(function()
       local save = liveSave()
       if type(save) ~= "table" then return end
       local data = liveData()
       for _, mon in ipairs(save.party or {}) do
-        if type(mon) == "table" and mon.g9TrainEdited then
+        if modernOwned(mon) then
           applyModern(defFromData(data, mon), mon)
         end
       end

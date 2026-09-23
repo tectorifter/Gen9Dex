@@ -10,10 +10,9 @@
 -- source) -- a real, confirmed gap, not assumed.
 --
 -- Every other item here is registered fresh via `mod.content.items
--- :register` (the same real, sanctioned mechanism species/
--- species_evolutions.lua's own evolution-item loop already uses in this
--- mod's own main.lua -- id/name/price/tossable is the whole real schema,
--- confirmed against src/mods/Schemas.lua's own R.items). This file owns
+-- :register` (the real, sanctioned registration mechanism -- id/name/
+-- price/tossable is the whole real schema, confirmed against
+-- src/mods/Schemas.lua's own R.items). This file owns
 -- the COMBAT effect only -- how a player actually acquires one of these
 -- in-game (shop, wild find, etc.) is a real, explicitly out-of-scope
 -- concern, the same "we don't handle X, we handle combat effect"
@@ -70,9 +69,9 @@ return function(mod)
   local function rawMon(who) return who and (who.mon or who) or nil end
 
   ------------------------------------------------------------------
-  -- New item registrations. tossable=true matches the real evolution-
-  -- item precedent (main.lua's own speciesEvolutions.items loop); price
-  -- 0 since none of these have a real in-game shop presence yet (out of
+  -- New item registrations. tossable=true matches the real native
+  -- item schema; price 0 since none of these have a real in-game shop
+  -- presence yet (out of
   -- this file's own combat-effect scope). pcall-guarded per item and as
   -- a whole block, same defensive pattern Counter's own bulk patch
   -- (combat/legacy_move_takeover.lua) already established -- a name

@@ -42,6 +42,8 @@ return function(mod, data)
       -- for clarity that Harvest IS handled by this file, not missed.
     end
   end
+  -- Round 338: Transform/Imposter re-run this for the ability it copied.
+  mod.exports.registerSwitchInAbility(applySwitchIn)
   mod.events:on("battle.started", function(ev)
     local battle = ev and ev.battle
     if not battle then return end

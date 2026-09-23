@@ -12,8 +12,7 @@
 --
 -- Deliberate scope notes (see src/README.md, round 6):
 --   * The canonical main.lua's INLINE phases are now reproduced too:
---     species-evolution patching, evolution-item registration, happiness
---     evolution, movepool sub-effect wiring (wireMovepoolSubEffects +
+--     movepool sub-effect wiring (wireMovepoolSubEffects +
 --     installMovepoolEffects), and move-name display -- all pcall-guarded.
 --     All 150 sibling files referenced from the entry load (142 canonical
 --     repo siblings via loadSibling, byte-identical to tectorifter/
@@ -784,6 +783,12 @@ local CUSTOM_EFFECT_PATCH = {
   PAINSPLIT = "GALAR_PAINSPLIT_EFFECT",
   BOUNCE = "GALAR_BOUNCE_EFFECT",
   OUTRAGE = "GALAR_OUTRAGE_EFFECT",
+  -- combat/modern_bide.lua (round 341): the store-and-release counter.
+  -- national_dex replaces the cart's own BIDE effect id with a power-0
+  -- NO_ADDITIONAL_EFFECT / EFFECT_NORMAL_HIT record, so the native machine
+  -- never started and the move did nothing; this re-homes it under a
+  -- cross-generation id (Showdown gen7 semantics -- see that file's header).
+  BIDE = "GALAR_BIDE_EFFECT",
   ETERNABEAM = "GALAR_ETERNABEAM_EFFECT",
   -- combat/modern_movepool_status.lua
   FLATTER = "GMAX_FLATTER_EFFECT",
@@ -1093,84 +1098,6 @@ local function installMoveNameDisplay(mod)
   end
 end
 
-local HAPPINESS_EVOLUTION_THRESHOLD = 220
-local HAPPINESS_BATTLE_GAIN = 3
-
-local function installHappinessEvolution(mod)
-  mod.content.evolution_methods:register("HAPPINESS", {
-    check = function(_, mon, _, trigger)
-      return trigger.kind == "levelup"
-        and (mon.happiness or 0) >= HAPPINESS_EVOLUTION_THRESHOLD
-    end,
-    describe = function() return "High friendship" end,
-  })
-
-  -- Approximated: any completed battle nudges the active mon's happiness
-  -- up a little, regardless of outcome. The real games track many finer
-  -- deltas (steps walked, level-ups, berries, fainting) this engine has
-  -- no equivalent hooks for.
-  mod.events:on("battle.ended", function(ev)
-    local mon = ev and ev.battle and ev.battle.player and ev.battle.player.mon
-    if mon and mon.hp and mon.hp > 0 then
-      mon.happiness = math.min(255, (mon.happiness or 70) + HAPPINESS_BATTLE_GAIN)
-    end
-  end)
-end
-
--- Generalizes gorochu.lua's installItemEffect (one item -> one species) to
--- any number of item ids. On use, looks up the target's *live* registered
--- species evolutions table (not our own local copy) for a method="ITEM"
--- entry matching the used item, so later patches to that table (by this
--- mod or another) are respected.
-local function installEvolutionItems(mod, itemIds)
-  local ok, ItemEffects = pcall(require, "src.inventory.ItemEffects")
-  if not (ok and ItemEffects and type(ItemEffects.use) == "function"
-      and type(ItemEffects.needsTarget) == "function") then
-    mod.log:warn("galar_gmax_dex: could not hook ItemEffects; new evolution items will not function")
-    return false
-  end
-  local key = "__galarGmaxDexEvolutionItems"
-  local holder = rawget(ItemEffects, key)
-  if holder then
-    for id in pairs(itemIds) do holder.items[id] = true end
-    return true
-  end
-  holder = {
-    items = {},
-    use = ItemEffects.use,
-    needsTarget = ItemEffects.needsTarget,
-  }
-  for id in pairs(itemIds) do holder.items[id] = true end
-
-  ItemEffects.needsTarget = function(itemId, itemDef)
-    if holder.items[itemId] then return true end
-    return holder.needsTarget(itemId, itemDef)
-  end
-  ItemEffects.use = function(data, save, itemId, target, battle, ...)
-    if not holder.items[itemId] then
-      return holder.use(data, save, itemId, target, battle, ...)
-    end
-    if battle then
-      return "failed", { "It can't be used\nin battle." }
-    end
-    local species = target and data and data.pokemon
-      and data.pokemon[target.species]
-    local matchedSpecies
-    for _, evo in ipairs(species and species.evolutions or {}) do
-      if evo.method == "ITEM" and evo.item == itemId then
-        matchedSpecies = evo.species
-        break
-      end
-    end
-    if not matchedSpecies then
-      return "failed", { "It won't have\nany effect." }
-    end
-    return "consumed", nil, { evolveTo = matchedSpecies }
-  end
-  rawset(ItemEffects, key, holder)
-  return true
-end
-
 return function(mod)
   -- --------------------------------------------------------------------------
   -- Helpers
@@ -1251,16 +1178,30 @@ return function(mod)
     return mod.options:get("damage_numbers") == "true"
   end
 
+  -- Frame-tick recursion brake (round 262).  Installed FIRST, before any
+  -- subsystem wraps a hook, so its core.update link is in the chain from the
+  -- very first frame.  Priority 100000 makes it the outermost link, which is
+  -- what lets it coalesce a re-entrant frame request before any other wrap
+  -- runs -- see core/tick_guard.lua for the whole design.
+  boot("tick_guard", function() return loadSibling("core/tick_guard.lua")(mod) end)
+
   boot("save_scrub", function() return loadSibling("stats/save_scrub.lua")(mod) end)
   boot("wild_modern_ivs", function() return loadSibling("stats/wild_modern_ivs.lua")(mod) end)
   boot("trainer_modern_stats", function() return loadSibling("stats/trainer_modern_stats.lua")(mod) end)
   boot("gen2_modern_stats", function() return loadSibling("stats/gen2_modern_stats.lua")(mod) end)
+  -- Eggs are Pokemon too: every egg found on a save load, on game.ready, in the
+  -- live party at battle start, or the moment one of the three egg builders
+  -- returns it, gets a generated nature/ability/IVs, zeroed EVs, the name "egg"
+  -- and HP 0 -- an egg is a FAINTED Pokemon for every battle purpose. See
+  -- stats/egg_normalize.lua.
+  boot("egg_normalize", function() return loadSibling("stats/egg_normalize.lua")(mod) end)
 
-  local gymTrainerTeams = boot("gym_trainer_teams", function() return loadSibling("overworld/gym_trainer_teams.lua") end)
-  boot("install_gym_trainer_teams", function()
-    local install = loadSibling("overworld/install_gym_trainer_teams.lua")
-    return install(mod, gymTrainerTeams)
-  end)
+  -- Pokecenter nurse takeover (round 296): full heal to the MODERN max on both
+  -- generations, the pokeball machine skipped, the player facing south when the
+  -- conversation ends, the pokerus report + its flag/phone-call sequencing kept,
+  -- and the shortened chat gated on g9-gui's SHORT HEAL CHAT option. See
+  -- overworld/pokecenter_heal.lua.
+  boot("pokecenter_heal", function() return loadSibling("overworld/pokecenter_heal.lua")(mod) end)
 
   boot("ev_yield_on_faint", function() return loadSibling("stats/ev_yield_on_faint.lua")(mod) end)
   local realBaseExpData = boot("base_exp_data", function() return loadSibling("stats/base_exp_data.lua") end)
@@ -1269,71 +1210,15 @@ return function(mod)
     return install(mod, realBaseExpData)
   end)
 
-  -- Species/evolution data + evolution-method stubs, then the canonical
-  -- inline evolution phases (happiness evolution, evolution items, and the
-  -- per-species evolution-patch loop) -- all pcall-guarded so a missing
-  -- dependency logs and the boot always continues.
-  local speciesEvolutions = boot("species_evolutions", function() return loadSibling("species/species_evolutions.lua") end)
-  boot("exotic_evolution_stubs", function() return loadSibling("species/exotic_evolution_stubs.lua")(mod) end)
-
-  -- HAPPINESS evolution method + the "completed battle nudges friendship"
-  -- approximation (canonical main.lua inline phase).
-  boot("happiness_evolution", function()
-    return installHappinessEvolution(mod)
-  end)
-
-  -- The consumable evolution items species_evolutions.lua introduces
-  -- (Apples/Scrolls/Sweets): registered as real items and wired through
-  -- ItemEffects (canonical installEvolutionItems).
-  boot("evolution_items", function()
-    local itemIds = {}
-    for id, def in pairs(speciesEvolutions.items or {}) do
-      mod.content.items:register(id, {
-        id = id, name = def.name, price = def.price or 0,
-        tossable = true, needsTarget = true,
-      })
-      itemIds[id] = true
-    end
-    installEvolutionItems(mod, itemIds)
-    return itemIds
-  end)
-
-  -- Patch evolutions onto every registered species -- skip (never error
-  -- on) species nothing has registered yet, and drop only the per-row
-  -- branches whose evolution TARGET is unregistered. Gen 2 rows use the
-  -- gen2Fields shape (into, not species). Canonical main.lua loop.
-  boot("species_evolution_patch", function()
-    local GameVersion = require("src.core.GameVersion")
-    local isGen2Boot = GameVersion.generation(GameVersion.get()) == 2
-    local patchedEvolutions, skippedSpecies, droppedRows = 0, 0, 0
-    for id, evoList in pairs(speciesEvolutions.evolutions or {}) do
-      if mod.content.pokemon:get(id) then
-        local resolvable = {}
-        for _, evo in ipairs(evoList) do
-          if mod.content.pokemon:get(evo.species) then
-            if isGen2Boot then
-              resolvable[#resolvable + 1] = {
-                method = evo.method, into = evo.species,
-                level = evo.level, item = evo.item,
-              }
-            else
-              resolvable[#resolvable + 1] = evo
-            end
-          else
-            droppedRows = droppedRows + 1
-          end
-        end
-        mod.content.pokemon:patch(id, { evolutions = resolvable })
-        patchedEvolutions = patchedEvolutions + 1
-      else
-        skippedSpecies = skippedSpecies + 1
-      end
-    end
-    mod.log:info(string.format(
-      "g9-battle-engine: patched evolutions onto %d species (%d skipped unregistered, %d rows dropped for an unregistered target)",
-      patchedEvolutions, skippedSpecies, droppedRows))
-    return patchedEvolutions
-  end)
+  -- Gen 2 vocabulary normalisation (species/gen2_vocab.lua): the single place
+  -- this mod translates Gen 1 id spellings -- MEDIUM_FAST and METALCLAW --
+  -- into the spellings Gold actually registers (GROWTH_MEDIUM_FAST,
+  -- METAL_CLAW). Its registry indexes are built lazily on first use, so
+  -- loading it here (ahead of both consumers below) is sufficient. On Gen 1
+  -- every method is a no-op -- the id already matches the live registry
+  -- exactly and is returned unchanged -- so the callers need no generation
+  -- branch of their own.
+  local vocab = boot("gen2_vocab", function() return loadSibling("species/gen2_vocab.lua")(mod) end)
 
   -- Movepool sub-effect wiring: reads every move's live national_dex
   -- record and patches custom .effect / .multiHit / .highCrit /
@@ -1345,16 +1230,60 @@ return function(mod)
     return wireMovepoolSubEffects(mod)
   end)
 
+  -- Multi-hit guarantee (2026-09-10, direct user report: "multi hit moves like
+  -- double kick are dealing damage once only"). wireMovepoolSubEffects patches
+  -- `multiHit` only onto records the content registry owns, and Gen 2
+  -- dispatches the count off the effect STRING -- so a cart-owned Gen-1
+  -- multi-hit move and a Gen-2 move whose effect is EFFECT_NORMAL_HIT both
+  -- resolve as one hit. This sister file enforces the count from
+  -- national_dex's live minHits/maxHits at each generation's own execution
+  -- seam. See combat/multi_hit.lua.
+  boot("multi_hit", function()
+    return loadSibling("combat/multi_hit.lua")(mod)
+  end)
+
+  -- Move-effect id-space completion: the loader's crossValidate pass reads
+  -- every `moves.<id>.effect` as a reference into the CURRENT generation's
+  -- move_effects registry, and the engine's own seed of that id space runs
+  -- from src.mods.Builtins BEFORE any mod registers a move -- so a modded
+  -- move's effect id (the Gen 1 NO_ADDITIONAL_EFFECT no-op, or a record
+  -- national_dex ships with an effect Gold has no id for) dangles and logs one
+  -- line per move. This seeds the same bare kind="full" marker the engine uses
+  -- for its own ROM moves. See combat/move_effect_markers.lua.
+  boot("move_effect_markers", function()
+    return loadSibling("combat/move_effect_markers.lua")(mod)
+  end)
+
   -- Learnset ownership: the real teachability gate. Its install returns a
   -- table with .isUsable / .reapplyLearnsets; reapplyLearnsets() patches
   -- content at load (canonical calls it once here).
   local learnsetOwnership = boot("learnset_ownership", function()
     local install = loadSibling("combat/learnset_ownership.lua")
-    local tbl = install(mod)
+    local tbl = install(mod, vocab)
     if tbl and tbl.reapplyLearnsets then
       pcall(tbl.reapplyLearnsets)
     end
     return tbl
+  end)
+
+  -- Gen 2 vocabulary sweep. Runs once national_dex has registered AND this
+  -- mod's own patches above have landed, because the ids it resolves are
+  -- the registries' own: national_dex ships every one of its ~1238 species
+  -- records with growthRate = "MEDIUM_FAST" (Red's spelling; Gold keys
+  -- growth_rates as GROWTH_*), and the learnset pass just wrote move ids
+  -- through the same live registry. Re-resolving every registered species
+  -- record through gen2_vocab collapses those dangling references in one
+  -- pass. A record whose references already exist is left untouched (no
+  -- patch op, no crossValidate attribution). No-op on Gen 1.
+  boot("gen2_vocab_sweep", function()
+    if not vocab or not vocab.reapply then return 0 end
+    local changedRecords, changedFields = vocab.reapply()
+    if changedRecords and changedRecords > 0 then
+      mod.log:info(string.format(
+        "g9-battle-engine: gen2_vocab: normalised %d dangling reference(s) across %d registered species records",
+        changedFields, changedRecords))
+    end
+    return changedRecords
   end)
 
   -- Gigantamax / Dynamax / Tera state APIs (storage + public setters;
@@ -1613,6 +1542,12 @@ return function(mod)
   -- boots right after modern_recovery_moves.
   boot("modern_charge_moves", function() return loadSibling("combat/modern_charge_moves.lua")(mod) end)
   boot("modern_movepool_counter", function() return loadSibling("combat/modern_movepool_counter.lua")(mod) end)
+  -- combat/modern_bide.lua (round 341): Bide's store-and-release. Boots with
+  -- the other movepool entries; it reads modern_combat's normalize/
+  -- displayNameFor and legacy_move_takeover's routeThroughBattleDamage (both
+  -- installed far earlier), and move_usability.lua's bide gate is resolved
+  -- lazily at battle time, so load order between the two does not matter.
+  boot("modern_bide", function() return loadSibling("combat/modern_bide.lua")(mod) end)
   -- (missing-effects phase 13): conditional / variable power (Avalanche,
   -- Bolt Beak/Fishious Rend, Hex, Facade, Brine, Payback, Fusion Bolt/
   -- Flare, Lashout, Psyblade, Expanding Force, Retaliate, Smellingsalts,
@@ -1624,6 +1559,14 @@ return function(mod)
   -- cureStatusOf (Smellingsalts/Wake-Up Slap) is looked up lazily at
   -- event time, since status_cure.lua may load later in the boot order.
   boot("modern_power_conditions", function() return loadSibling("combat/modern_power_conditions.lua")(mod) end)
+  -- combat/modern_fallback_moves.lua: hardcoded move records for moves the
+  -- move data (national_dex) does not supply, plus the runtime power a record
+  -- cannot express. The one entry is PIKA_PAPOW (the fourth Let's Go
+  -- partner-Pikachu move national_dex omits): it registers the Electric/special
+  -- record when the registry has none and wires its friendship-based power
+  -- (floor(happiness / 2.5), 1..102). Needs only modern_combat's
+  -- registerPowerOverride, so it boots here with the other power entries.
+  boot("modern_fallback_moves", function() return loadSibling("combat/modern_fallback_moves.lua")(mod) end)
   boot("modern_status_effects", function() return loadSibling("combat/modern_status_effects.lua")(mod) end)
   boot("status_condition_cleanup", function() return loadSibling("combat/status_condition_cleanup.lua")(mod) end)
   boot("inflict_status", function()

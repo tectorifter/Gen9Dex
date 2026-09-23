@@ -312,3 +312,27 @@ directly instead of the caster/target it was actually handed (a real risk
 for code added without this multi-battler context in mind — audit before
 assuming any given ability/status file generalizes correctly to battler
 #2 or #3) may misclassify or silently no-op for one.
+
+## Per-action intended failure — `actingBattlers[i].fail` (round 289, 4.4.4)
+
+The real entry shape the loop consumes is `{ mon = <real mon>, move = <move id>,
+target = <real mon or nil> }`. One optional field was added in round 289:
+
+```lua
+mod.exports.resolveTurnActions(battle, {
+  { mon = <real mon>, move = <move id>, target = nil, fail = true },
+  ...
+})
+```
+
+`fail = true` means the CALLER already knows this action has no legal
+recipient from its own slot and wants it USED AND FAILED — announced ("X used
+Y!"), PP-spent, with the engine's own "But it failed!" line, at that action's
+own place in the turn order. Both `resolveTurnActions` (Gen 2) and
+`resolveNextActionForGen1` (Gen 1 stepwise) honor it, and — crucially — it is
+per-ACTION, never per-turn: every other actor this turn still resolves. This is
+what lets a triple-battle slot whose only live foes are non-adjacent fail alone
+instead of the caller abandoning the rest of its team's selection.
+
+`target` is ignored when `fail` is set (pass nil). When `fail` is absent the
+entry behaves exactly as before.
