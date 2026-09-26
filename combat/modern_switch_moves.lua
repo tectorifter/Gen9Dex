@@ -25,6 +25,7 @@
 -- (Events:emit, src/mods/Events.lua) is safe -- it only ever does a plain
 -- field write and an emit, nothing that a pcall boundary could break.
 return function(mod)
+  local Strings = require("src.core.Strings")
   local SWITCH_MOVES = { UTURN = true, VOLTSWITCH = true, FLIPTURN = true }
 
   for id in pairs(SWITCH_MOVES) do
@@ -69,7 +70,7 @@ return function(mod)
     run = function(battle, attacker, defender, def, moveId, sureHit)
       mod.exports.changeStage(battle, defender, "attack", -1, true, true)
       mod.exports.changeStage(battle, defender, "spa", -1, true, true)
-      battle:emit({ kind = "message", text = battle:monName(attacker) .. " left the battlefield!" })
+      battle:emit({ kind = "message", text = Strings("%s left the battlefield!", battle:monName(attacker)) })
       mod.exports.requestSwitch(battle, attacker, { reason = moveId })
     end,
   })
@@ -116,7 +117,7 @@ return function(mod)
         kind = "primary",
         run = function(battle, attacker, defender, def, moveId, sureHit)
           if not battle.wild then
-            battle:emit({ kind = "message", text = battle:monName(attacker) .. " teleported away!" })
+            battle:emit({ kind = "message", text = Strings("%s teleported away!", battle:monName(attacker)) })
             mod.exports.requestSwitch(battle, attacker, { reason = moveId })
             return
           end

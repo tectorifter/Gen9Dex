@@ -54,6 +54,7 @@
 -- side; trickRoom + dimensionLock together removes room-move access
 -- entirely for the rest of the fight.
 return function(mod)
+  local Strings = require("src.core.Strings")
   local gen2Ok_Battle, Battle = pcall(require, "src.battle.gen2.Battle")
   Battle = gen2Ok_Battle and Battle or nil
   -- No real item extends any room in any current generation, and no
@@ -68,7 +69,7 @@ return function(mod)
     "trick_room: combat/field_duration.lua must load first")
 
   local TRICKROOM_EFFECT_ID = "GALAR_TRICKROOM_EFFECT"
-  local TRICKROOM_START_TEXT = " twisted\nthe dimensions!"
+  local TRICKROOM_START_TEXT = "%s twisted\nthe dimensions!"
   local TRICKROOM_END_TEXT = "The twisted\ndimensions returned\nto normal!"
   local MAGICROOM_EFFECT_ID = "GALAR_MAGICROOM_EFFECT"
   local MAGICROOM_START_TEXT = "It created a bizarre area\nin which Pokémon's held items\nlose their effects!"
@@ -92,13 +93,13 @@ return function(mod)
       if battle.trickRoomActive then
         battle.trickRoomActive = false
         battle.trickRoomTurns = nil
-        battle:emit({ kind = "message", text = TRICKROOM_END_TEXT })
+        battle:emit({ kind = "message", text = Strings(TRICKROOM_END_TEXT) })
         return
       end
       battle.trickRoomActive = true
       battle.trickRoomTurns = resolveFieldDuration(attacker, FIELD_BASE_TURNS,
         FIELD_EXTENDED_TURNS, nil)
-      battle:emit({ kind = "message", text = battle:monName(attacker) .. TRICKROOM_START_TEXT })
+      battle:emit({ kind = "message", text = Strings(TRICKROOM_START_TEXT, battle:monName(attacker)) })
     end,
   })
 
@@ -134,14 +135,14 @@ return function(mod)
         battle.wonderRoomActive = false
         battle.wonderRoomTurns = nil
         applyWonderRoomToActives(battle, false)
-        battle:emit({ kind = "message", text = WONDERROOM_END_TEXT })
+        battle:emit({ kind = "message", text = Strings(WONDERROOM_END_TEXT) })
         return
       end
       battle.wonderRoomActive = true
       battle.wonderRoomTurns = resolveFieldDuration(attacker, FIELD_BASE_TURNS,
         FIELD_EXTENDED_TURNS, nil)
       applyWonderRoomToActives(battle, true)
-      battle:emit({ kind = "message", text = battle:monName(attacker) .. WONDERROOM_START_TEXT })
+      battle:emit({ kind = "message", text = Strings(WONDERROOM_START_TEXT, battle:monName(attacker)) })
     end,
   })
 
@@ -173,13 +174,13 @@ return function(mod)
       if battle.magicRoomActive then
         battle.magicRoomActive = false
         battle.magicRoomTurns = nil
-        battle:emit({ kind = "message", text = MAGICROOM_END_TEXT })
+        battle:emit({ kind = "message", text = Strings(MAGICROOM_END_TEXT) })
         return
       end
       battle.magicRoomActive = true
       battle.magicRoomTurns = resolveFieldDuration(attacker, FIELD_BASE_TURNS,
         FIELD_EXTENDED_TURNS, nil)
-      battle:emit({ kind = "message", text = battle:monName(attacker) .. MAGICROOM_START_TEXT })
+      battle:emit({ kind = "message", text = Strings(MAGICROOM_START_TEXT, battle:monName(attacker)) })
     end,
   })
 
@@ -216,14 +217,14 @@ return function(mod)
     local battle = ev and ev.battle
     if not battle then return end
     tickRoom(battle, "trickRoomActive", "trickRoomTurns", function()
-      battle:emit({ kind = "message", text = TRICKROOM_END_TEXT })
+      battle:emit({ kind = "message", text = Strings(TRICKROOM_END_TEXT) })
     end)
     tickRoom(battle, "magicRoomActive", "magicRoomTurns", function()
-      battle:emit({ kind = "message", text = MAGICROOM_END_TEXT })
+      battle:emit({ kind = "message", text = Strings(MAGICROOM_END_TEXT) })
     end)
     tickRoom(battle, "wonderRoomActive", "wonderRoomTurns", function()
       applyWonderRoomToActives(battle, false)
-      battle:emit({ kind = "message", text = WONDERROOM_END_TEXT })
+      battle:emit({ kind = "message", text = Strings(WONDERROOM_END_TEXT) })
     end)
   end)
 
@@ -281,7 +282,7 @@ return function(mod)
         -- ban arm, and only under dimensionLock or their own room's flag.
         local ownFlag = ROOM_MOVE_FLAG[moveId]
         if ownFlag and (flags.dimensionLock or flags[ownFlag]) then
-          self:emit({ kind = "message", text = "But it failed!" })
+          self:emit({ kind = "message", text = Strings("But it failed!") })
           return
         end
       end

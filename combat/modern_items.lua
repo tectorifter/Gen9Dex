@@ -537,8 +537,7 @@ return function(mod)
       local facts = itemFlingFacts and itemFlingFacts(item)
       setItemOf(ev.user, nil, gen2)
       battle:emit({ kind = "message",
-        text = displayNameFor(battle, ev.user, gen2) .. " threw its "
-          .. itemLabel(battle, item) .. "!" })
+        text = Strings("%s threw its %s!", displayNameFor(battle, ev.user, gen2), itemLabel(battle, item)) })
       -- Phase 26: the flung item's real on-hit riders. Showdown's Fling
       -- applies the thrown item's own `fling.status` / `fling.volatileStatus`
       -- to the target (Poison Barb -> psn, King's Rock -> flinch, Light
@@ -611,9 +610,7 @@ return function(mod)
       if not item or isUnremovable(item) or stickyHeld then return end
       setItemOf(ev.target, nil, gen2)
       battle:emit({ kind = "message",
-        text = displayNameFor(battle, ev.user, gen2) .. " knocked off "
-          .. displayNameFor(battle, ev.target, gen2) .. "'s "
-          .. itemLabel(battle, item) .. "!" })
+        text = Strings("%s knocked off %s's %s!", displayNameFor(battle, ev.user, gen2), displayNameFor(battle, ev.target, gen2), itemLabel(battle, item)) })
     end)
     if not ok then
       mod.log:warn("galar_gmax_dex: modern_items: Knock Off item-clear failed: %s", tostring(err))
@@ -639,9 +636,7 @@ return function(mod)
       setItemOf(ev.target, nil, gen2)
       setItemOf(ev.user, item, gen2)
       battle:emit({ kind = "message",
-        text = displayNameFor(battle, ev.user, gen2) .. " stole "
-          .. displayNameFor(battle, ev.target, gen2) .. "'s "
-          .. itemLabel(battle, item) .. "!" })
+        text = Strings("%s stole %s's %s!", displayNameFor(battle, ev.user, gen2), displayNameFor(battle, ev.target, gen2), itemLabel(battle, item)) })
     end)
     if not ok then
       mod.log:warn("galar_gmax_dex: modern_items: Covet item-steal failed: %s", tostring(err))
@@ -677,8 +672,7 @@ return function(mod)
       if not item or not isBerry(item) then return end
       setItemOf(ev.target, nil, gen2)
       battle:emit({ kind = "message",
-        text = displayNameFor(battle, ev.target, gen2) .. "'s "
-          .. itemLabel(battle, item) .. " was burned up!" })
+        text = Strings("%s's %s was burned up!", displayNameFor(battle, ev.target, gen2), itemLabel(battle, item)) })
     end)
     if not ok then
       mod.log:warn("galar_gmax_dex: modern_items: Incinerate berry-destroy failed: %s", tostring(err))
@@ -710,13 +704,13 @@ return function(mod)
       eater.statusTurns = nil
       eater.toxicCounter = nil
       battle:emit({ kind = "status", side = battle:sideOf(eater), status = nil,
-        text = eaterName .. "'s status was cured!" })
+        text = Strings("%s's status was cured!", eaterName) })
       return true
     end
     if (effect == "HELD_HEAL_CONFUSION" or effect == "HELD_HEAL_STATUS")
         and battle:volatile(eater).confuseCount then
       battle:volatile(eater).confuseCount = nil
-      battle:emit({ kind = "message", text = eaterName .. "'s confusion was cured!" })
+      battle:emit({ kind = "message", text = Strings("%s's confusion was cured!", eaterName) })
       return true
     end
     return false
@@ -744,8 +738,7 @@ return function(mod)
       setItemOf(ev.target, nil, gen2)
       local userName = displayNameFor(battle, ev.user, gen2)
       battle:emit({ kind = "message",
-        text = userName .. " ate " .. displayNameFor(battle, ev.target, gen2)
-          .. "'s " .. itemLabel(battle, item) .. "!" })
+        text = Strings("%s ate %s's %s!", userName, displayNameFor(battle, ev.target, gen2), itemLabel(battle, item)) })
       -- Showdown's own Bug Bite/Pluck tail (moves.ts:1918-1929, :13447-1358):
       -- `if (item.onEat) source.ateBerry = true;` -- the EATER's berry-eaten
       -- flag, which is what Belch's own onTry reads (moves.ts:1210). Mirrors

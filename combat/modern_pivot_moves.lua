@@ -85,6 +85,7 @@
 -- rather than half-building a Gen 1 path, exactly as combat/
 -- modern_force_switch.lua's own header already does.
 return function(mod)
+  local Strings = require("src.core.Strings")
   local gen2Ok_Battle, Battle = pcall(require, "src.battle.gen2.Battle")
   Battle = gen2Ok_Battle and Battle or nil
   local gen2Ok_Effects, Effects = pcall(require, "src.battle.gen2.Effects")
@@ -154,8 +155,8 @@ return function(mod)
   end
 
   local function failed(battle)
-    say(battle, "But it failed!")
-    if not isGen2Battle(battle) then return { "But it failed!" } end
+    say(battle, Strings("But it failed!"))
+    if not isGen2Battle(battle) then return { Strings("But it failed!") } end
     return {}
   end
 
@@ -360,8 +361,7 @@ return function(mod)
     if not (pending and pending.mon == previous) then return end
     battle.__g9ShedTailSub = nil
     if mod.exports.shedTailApplySubstitute(battle, incoming, pending.hp) then
-      say(battle, displayNameFor(battle, incoming, isGen2Battle(battle))
-        .. " received the substitute!")
+      say(battle, Strings("%s received the substitute!", displayNameFor(battle, incoming, isGen2Battle(battle))))
     end
   end)
 
@@ -384,7 +384,7 @@ return function(mod)
       battle:emit({ kind = "damage", side = battle:sideOf(user),
         amount = cost, hp = m.hp, anim = false })
       battle.__g9ShedTailSub = { mon = user, hp = subHp }
-      local lines = { displayNameFor(battle, user, gen2) .. " made a substitute!" }
+      local lines = { Strings("%s made a substitute!", displayNameFor(battle, user, gen2)) }
       for i = 1, #lines do say(battle, lines[i]) end
       requestSwitch(battle, user, { reason = "SHEDTAIL" })
     end,
@@ -409,7 +409,7 @@ return function(mod)
           local turns = resolveFieldDuration(gen2 and user or nil,
             FIELD_BASE_TURNS, FIELD_EXTENDED_TURNS, "ICYROCK")
           setWeather(battle, gen2, "SNOW", turns, user)
-          lines[#lines + 1] = "It started to snow!"
+          lines[#lines + 1] = Strings("It started to snow!")
         end
       end
       for i = 1, #lines do say(battle, lines[i]) end
@@ -594,8 +594,7 @@ return function(mod)
       -- drain with every use; `ppUps = 0` keeps the slot well-formed for
       -- Gen 1's own `def.pp + ppUps * floor(def.pp/5)` maximum as well.
       userMon.moves[sketchIndex] = { id = last, pp = basePp, maxPp = basePp, ppUps = 0 }
-      return finish(battle, { displayNameFor(battle, user, gen2)
-        .. " sketched " .. moveNameOf(battle, last) .. "!" })
+      return finish(battle, { Strings("%s sketched %s!", displayNameFor(battle, user, gen2), moveNameOf(battle, last)) })
     end,
   })
   mod.content.moves:patch("SKETCH", { effect = "G9_SKETCH_EFFECT" })
@@ -679,8 +678,7 @@ return function(mod)
         user.focusEnergy = target.focusEnergy
         if userMon then userMon.laserFocusTurns = targetMon and targetMon.laserFocusTurns end
       end
-      return finish(battle, { displayNameFor(battle, user, gen2)
-        .. " copied " .. displayNameFor(battle, target, gen2) .. "'s stat changes!" })
+      return finish(battle, { Strings("%s copied %s's stat changes!", displayNameFor(battle, user, gen2), displayNameFor(battle, target, gen2)) })
     end,
   })
   mod.content.moves:patch("PSYCHUP", { effect = "G9_PSYCHUP_EFFECT" })
@@ -729,8 +727,7 @@ return function(mod)
       end
       if not applied then return failed(battle) end
       cureStatus(battle, userMon, gen2)
-      return finish(battle, { displayNameFor(battle, user, gen2)
-        .. " shifted its status to " .. displayNameFor(battle, target, gen2) .. "!" })
+      return finish(battle, { Strings("%s shifted its status to %s!", displayNameFor(battle, user, gen2), displayNameFor(battle, target, gen2)) })
     end,
   })
   mod.content.moves:patch("PSYCHOSHIFT", { effect = "G9_PSYCHOSHIFT_EFFECT" })

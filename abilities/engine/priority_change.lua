@@ -22,6 +22,7 @@
 -- registerDamageModifier already is) rather than computing priority
 -- itself anywhere.
 return function(mod, data)
+  local Strings = require("src.core.Strings")
   local nationalDex = mod.find and mod.find("national_dex")
   assert(nationalDex and nationalDex.exports and nationalDex.exports.moveById,
     "priority_change: national_dex must be loaded first")
@@ -118,7 +119,7 @@ return function(mod, data)
           local gen2 = isGen2Battle(self)
           for _, t in ipairs(curTypesOf(defender, gen2)) do
             if t == "DARK" then
-              self:emit({ kind = "message", text = "But, it failed!" })
+              self:emit({ kind = "message", text = Strings("But it failed!") })
               return
             end
           end

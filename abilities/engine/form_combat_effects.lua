@@ -3,6 +3,7 @@
 -- explicit "transformation out of scope, combat effect isn't" rule
 -- behind every one of these.
 return function(mod, data)
+  local Strings = require("src.core.Strings")
   local nationalDex = mod.find and mod.find("national_dex")
   assert(nationalDex and nationalDex.exports and nationalDex.exports.moveById,
     "form_combat_effects: national_dex must be loaded first")
@@ -146,10 +147,12 @@ return function(mod, data)
     end
   end
   local BattleState = require("src.battle.BattleState")
-  local nativePerformMoveGulp = BattleState.performMove
+  local nativePerformMoveGulp = rawget(BattleState, "performMove")
+  if type(nativePerformMoveGulp) == "function" then
   function BattleState:performMove(user, target, moveInst, isCalled)
     if user and moveInst and GULP_MOVES[moveInst.id] then loadGulpMissile(user, false) end
     return nativePerformMoveGulp(self, user, target, moveInst, isCalled)
+  end
   end
   mod.events:on("battle.damage_dealt", function(ev)
     local battle, user, target = ev and ev.battle, ev and ev.user, ev and ev.target
@@ -287,14 +290,14 @@ return function(mod, data)
       if activeTeraType(battle, mon, gen2) == "STELLAR" then
         setWeather(battle, gen2, nil)
         setTerrain(battle, mon, nil, "The terrain\nnormalized!")
-        battle:emit({ kind = "message", text = "All weather and terrain effects vanished!" })
+        battle:emit({ kind = "message", text = Strings("All weather and terrain effects vanished!") })
       end
     elseif id == "EMBODYASPECT" and data.EMBODYASPECT then
       local species = speciesIdOf(mon, gen2)
       local stat = EMBODY_STAT_BY_SPECIES[species] or "speed" -- base Ogerpon (Teal Mask) defaults to Speed
       if stat == "speed" then
         raiseSpeed(battle, mon, gen2, 1)
-        battle:emit({ kind = "message", text = displayNameFor(battle, mon, gen2) .. "'s Speed rose!" })
+        battle:emit({ kind = "message", text = Strings("%s's Speed rose!", displayNameFor(battle, mon, gen2)) })
       else
         for _, line in ipairs(changeStage(battle, mon, stat, 1, false, gen2) or {}) do
           battle:emit({ kind = "message", text = line })

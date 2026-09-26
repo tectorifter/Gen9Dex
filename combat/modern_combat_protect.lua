@@ -457,7 +457,7 @@ return function(mod)
       local maxHp = m.stats and m.stats.hp
       if maxHp and maxHp > 0 then
         m.hp = math.max(0, (m.hp or 0) - math.max(1, math.floor(maxHp * rider.fraction)))
-        sayB(battle, nameB(battle, attacker) .. " was hurt!")
+        sayB(battle, Strings("%s was hurt!", nameB(battle, attacker)))
       end
     elseif rider.status then
       -- applyStatus enforces ability immunity (status_immunity.lua) and
@@ -512,10 +512,10 @@ return function(mod)
       clearProtection(n.user)
       if rollStall(n.battle, n.user) then
         raiseProtection(n.battle, n.user, "protect", n.moveId)
-        say(n, out, nameOf(n, n.user) .. " protected itself!")
+        say(n, out, Strings("%s protected itself!", nameOf(n, n.user)))
       else
         out.failed = true
-        say(n, out, "But it failed!")
+        say(n, out, Strings("But it failed!"))
       end
       return out
     end,
@@ -558,10 +558,10 @@ return function(mod)
         -- Gen 2 has a native `endure` volatile (Battle:volatile); Gen 1
         -- has no Endure at all, so only the shared stall chain runs there.
         if n.gen2 then n.battle:volatile(n.user).endure = true end
-        say(n, out, nameOf(n, n.user) .. " braced itself!")
+        say(n, out, Strings("%s braced itself!", nameOf(n, n.user)))
       else
         out.failed = true
-        say(n, out, "But it failed!")
+        say(n, out, Strings("But it failed!"))
       end
       return out
     end,
@@ -608,10 +608,10 @@ return function(mod)
       clearProtection(n.user)
       if rollStall(n.battle, n.user) then
         raiseProtection(n.battle, n.user, "guard", n.moveId)
-        say(n, out, nameOf(n, n.user) .. " protected itself!")
+        say(n, out, Strings("%s protected itself!", nameOf(n, n.user)))
       else
         out.failed = true
-        say(n, out, "But it failed!")
+        say(n, out, Strings("But it failed!"))
       end
       return out
     end,
@@ -942,7 +942,7 @@ return function(mod)
           kind = "primary",
           run = function(battle)
             battle:emit({ kind = "message",
-              text = "It doesn't affect " .. battle:monName(defender) .. "..." })
+              text = Strings("It doesn't affect %s...", battle:monName(defender)) })
             -- A blocked status move still triggers a contact shield's
             -- rider if it makes contact (Showdown's onTryHit fires for
             -- any blocked move, status or damaging alike).
@@ -980,9 +980,9 @@ return function(mod)
   -- Gen 2-only, so only `protected` is reachable here; both are checked
   -- for symmetry with Part D above.
   ------------------------------------------------------------------
-  if BattleState and BattleState.performMove and BattleState.effectRecord then
-    local nativePerformMove = BattleState.performMove
-    local nativeEffectRecord = BattleState.effectRecord
+  if BattleState and rawget(BattleState, "performMove") and rawget(BattleState, "effectRecord") then
+    local nativePerformMove = rawget(BattleState, "performMove")
+    local nativeEffectRecord = rawget(BattleState, "effectRecord")
     function BattleState:performMove(user, target, moveInst, isCalled)
       if not (target and target ~= user and protectionOf(self, target) ~= nil) then
         return nativePerformMove(self, user, target, moveInst, isCalled)

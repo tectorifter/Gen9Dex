@@ -1,6 +1,7 @@
 -- Dispatch engine for abilities/data/emergency_exit.lua -- see that
 -- file's own header for the real mechanic and grounding.
 return function(mod, data)
+  local Strings = require("src.core.Strings")
   local abilityIdOf = mod.exports.abilityIdOf
   local requestSwitch = mod.exports.requestSwitch
   local displayNameFor = mod.exports.displayNameFor
@@ -25,7 +26,7 @@ return function(mod, data)
     -- on every hit once already below it.
     if not (hpBefore * 2 > maxHp and hpAfter * 2 <= maxHp) then return end
     local gen2 = isGen2Battle(battle)
-    local text = displayNameFor(battle, target, gen2) .. " fled the battle!"
+    local text = Strings("%s fled the battle!", displayNameFor(battle, target, gen2))
     requestSwitch(battle, target, { reason = id, text = text })
   end)
 

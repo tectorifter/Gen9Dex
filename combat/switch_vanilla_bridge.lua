@@ -20,6 +20,7 @@
 -- the list at once here, with no interstitial "no will to fight"-style
 -- line, instead of native's own timed message first.
 return function(mod)
+  local Strings = require("src.core.Strings")
   local gen2Ok_BattleState, BattleState = pcall(require, "src.ui.gen2.BattleState")
   if not gen2Ok_BattleState then
     mod.log:info("g9-battle-engine: switch_vanilla_bridge requires Gen 2; skipped on this Gen 1 game")
@@ -58,7 +59,7 @@ return function(mod)
     local head = self.queue[1]
     if head and head.kind == "switch-request" then
       table.remove(self.queue, 1)
-      self.message = head.text or (self:name(head.mon) .. " must switch!")
+      self.message = head.text or (Strings("%s must switch!", self:name(head.mon)))
       self.messageTimer = 0
       openVoluntarySwitchMenu(self)
       return

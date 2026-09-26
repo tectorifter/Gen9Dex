@@ -32,6 +32,7 @@
 -- one, real, honest gap versus current Showdown (which keeps residual
 -- too), not silently passed off as exact.
 return function(mod)
+  local Strings = require("src.core.Strings")
   local gen2Ok_Battle, Battle = pcall(require, "src.battle.gen2.Battle")
   Battle = gen2Ok_Battle and Battle or nil
 
@@ -54,7 +55,7 @@ return function(mod)
       self.enemyIndex = index
       self.stages.enemy = Battle.newStages()
       self:emit({ kind = "send", side = "enemy", mon = mon,
-        text = "Go! " .. self:monName(mon) .. "!" })
+        text = Strings("Go! %s!", self:monName(mon)) })
       local Runtime = require("src.mods.Runtime")
       Runtime.emit("battle.battler_switched", {
         battle = self, side = self:sideRecord(mon), battler = mon,

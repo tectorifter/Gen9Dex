@@ -12,6 +12,7 @@
 -- Phase 5 (Prankster needed the same thing) -- not a second, hardcoded
 -- priority table.
 return function(mod, data)
+  local Strings = require("src.core.Strings")
   local nationalDex = mod.find and mod.find("national_dex")
   assert(nationalDex and nationalDex.exports and nationalDex.exports.moveById,
     "prevent_priority_fail: national_dex must be loaded first")
@@ -27,7 +28,7 @@ return function(mod, data)
       if defender and defender ~= attacker and data[abilityIdOf(defender)] then
         local info = moveById(moveId)
         if info and info.target == "selected-pokemon" and self:movePriority(moveId, attacker) > 0 then
-          self:emit({ kind = "message", text = "But, it failed!" })
+          self:emit({ kind = "message", text = Strings("But it failed!") })
           return
         end
       end

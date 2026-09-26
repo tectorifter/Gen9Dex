@@ -172,6 +172,7 @@
 -- real hit is always observed, and nil genuinely means "nothing hit us this
 -- turn" -> fail.
 return function(mod)
+  local Strings = require("src.core.Strings")
   local Damage = require("src.battle.Damage")
   local romText = require("src.core.RomText")
 
@@ -363,7 +364,7 @@ return function(mod)
           user.counterAttacker = nil
           user.counterAttackerMon = nil
           battle:markMissed()
-          battle:emit({ kind = "message", text = "But it failed!" })
+          battle:emit({ kind = "message", text = Strings("But it failed!") })
           return {}
         end
         local dmg = math.min(65535, math.max(1, math.floor(taken * numerator / denominator)))

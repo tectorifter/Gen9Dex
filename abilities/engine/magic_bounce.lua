@@ -1,6 +1,7 @@
 -- Dispatch engine for abilities/data/magic_bounce.lua -- see that
 -- file's own header for the real scope and grounding.
 return function(mod, data)
+  local Strings = require("src.core.Strings")
   local nationalDex = mod.find and mod.find("national_dex")
   assert(nationalDex and nationalDex.exports and nationalDex.exports.moveFlags,
     "magic_bounce: national_dex must be loaded first")
@@ -75,7 +76,7 @@ return function(mod, data)
       if defender and attacker and defender ~= attacker and not (guard and guard[moveId])
           and bounceable(self, moveId, attacker, defender, true) then
         self:emit({ kind = "message",
-          text = displayNameFor(self, defender, true) .. " bounced the move back!" })
+          text = Strings("%s bounced the move back!", displayNameFor(self, defender, true)) })
         bounced[self] = guard or {}
         bounced[self][moveId] = true
         local ok, err = pcall(nativeUseMoveBounce, self, defender, attacker, moveId)
@@ -88,14 +89,15 @@ return function(mod, data)
   end
 
   local BattleState = require("src.battle.BattleState")
-  local nativePerformMoveBounce = BattleState.performMove
+  local nativePerformMoveBounce = rawget(BattleState, "performMove")
   local boundGen1 = setmetatable({}, { __mode = "k" })
+  if type(nativePerformMoveBounce) == "function" then
   function BattleState:performMove(user, target, moveInst, isCalled)
     local moveId = moveInst and moveInst.id
     local guard = boundGen1[self]
     if moveId and target and user and target ~= user and not (guard and guard[moveId])
         and bounceable(self, moveId, user, target, false) then
-      self:sayNext(displayNameFor(self, target, false) .. " bounced the move back!")
+      self:sayNext(Strings("%s bounced the move back!", displayNameFor(self, target, false)))
       boundGen1[self] = guard or {}
       boundGen1[self][moveId] = true
       local ok, err = pcall(nativePerformMoveBounce, self, target, user, moveInst, isCalled)
@@ -104,6 +106,7 @@ return function(mod, data)
       return
     end
     return nativePerformMoveBounce(self, user, target, moveInst, isCalled)
+  end
   end
 
   mod.log:info("g9-battle-engine: magic_bounce installed (MAGICBOUNCE)")

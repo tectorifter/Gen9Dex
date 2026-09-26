@@ -117,6 +117,37 @@ return function(mod)
     return { allies = adjacency.allies or {}, enemies = adjacency.enemies or {} }
   end
 
+  -- requestOpposite(battle, caster) -> the single battler DIRECTLY OPPOSITE
+  -- the caster's own battlefield slot, or nil when that exact opposing slot
+  -- is empty or its occupant is not standing. This is the position question
+  -- Pokemon Showdown's Imposter asks -- `pokemon.side.foe.active[pokemon
+  -- .position]` (abilities.ts:2123): the ability transforms into the foe in
+  -- the SAME slot column, and does NOTHING when there is no such foe. It
+  -- never falls back to a different foe and never to an ally.
+  --
+  -- Answered by the SAME battle-scene seam as requestAdjacency (the
+  -- `g9.request_opposite` hook), so this engine still tracks no battlefield
+  -- position itself: the scene owns its columns (battle_screen.lua's
+  -- playerBattlers[i]/enemyBattlers[i] are index-aligned) and answers the
+  -- hook. A scene that has not wrapped it gets nativeFallbackOpposite below
+  -- -- in a 1-vs-1 fight the one other battler IS the one directly opposite.
+  -- caster may be an engine battler or a raw mon (the engine's callers pass
+  -- the raw mon, matching the adjacency contract).
+  local function nativeFallbackOpposite(battle, caster)
+    if not (battle and battle.player) then return nil end
+    local raw = rawSide(caster)
+    local playerMon = rawSide(battle.player)
+    local enemyMon = rawSide(battle.enemy)
+    if raw == playerMon then return enemyMon end
+    if raw == enemyMon then return playerMon end
+    -- caster is not one of the two native slots: a plain native battle has no
+    -- other battler to be opposite at all.
+    return nil
+  end
+  mod.exports.requestOpposite = function(battle, caster)
+    return Runtime.call("g9.request_opposite", nativeFallbackOpposite, battle, caster)
+  end
+
   ------------------------------------------------------------------
   -- allActiveBattlers(battle): the real, N-way "every mon currently in
   -- this battle" roster -- explicit user request (2026-08-28), the fix
@@ -269,16 +300,16 @@ return function(mod)
     return ALLY_RECIPIENT_ARCHETYPES[mod.exports.targetArchetypeOf(moveId)] == true
   end
 
-  -- isAllyTargetable(moveId) -> boolean. True when the move can legally be
-  -- aimed at one of the caster's OWN adjacent mons, i.e. the set a battle
-  -- scene's target picker should offer allies for. Covers the inherently
-  -- ally-directed archetypes plus the selected-pokemon moves that only
-  -- ever HEAL (Heal Pulse's own live record: target="selected-pokemon",
-  -- category="heal", healing=50) -- the classic case where the player
-  -- chooses which ally to heal from the same picker. Everything else
-  -- (attacks, spreads, self/field moves) is unchanged, so a plain attack
-  -- still auto-targets the sole live foe with no extra picker.
-  mod.exports.isAllyTargetable = function(moveId)
+  -- isAllyOnlyMove(moveId) -> boolean. True for a move whose ONLY legal
+  -- recipient is on the caster's own side: the inherently ally-directed
+  -- archetypes ("ally" -- Helping Hand, Aromatic Mist; "user-or-ally" --
+  -- Acupressure) plus the selected-pokemon HEAL moves (Heal Pulse / Floral
+  -- Healing -- national_dex files them under "selected-pokemon" with
+  -- category="heal", healing=50, but Showdown gives them `adjacentAlly`). A
+  -- battle scene's target picker must offer NO foe for one of these, and in
+  -- singles (no ally) the move is USED and FAILS rather than being silently
+  -- applied to the lone enemy -- the reported Helping Hand / Heal Pulse bug.
+  mod.exports.isAllyOnlyMove = function(moveId)
     local info = moveById(moveId)
     local archetype = (info and info.target) or "selected-pokemon"
     if archetype == "ally" or archetype == "user-or-ally" then return true end
@@ -287,6 +318,35 @@ return function(mod)
       return true
     end
     return false
+  end
+
+  -- isAllyTargetable(moveId) -> boolean. True when the move can legally be
+  -- aimed at one of the caster's OWN adjacent mons -- the set a battle
+  -- scene's target picker should offer allies for. Covers isAllyOnlyMove
+  -- above, PLUS every selected-pokemon move that is not a damaging attack: a
+  -- status/support single-target move can be aimed at an adjacent ally
+  -- exactly as the cartridges and Showdown allow (Transform -- any adjacent
+  -- Pokemon including an ally; Thunder Wave, Toxic, Trick, Skill Swap,
+  -- Instruct, ...). national_dex's own `damageClass == "status"` is the
+  -- authoritative marker for those, and it is what excludes a variable-power
+  -- DAMAGING move like Seismic Toss (damageClass "physical", no power) from
+  -- the ally list. This is what makes Transform targetable at an ally in the
+  -- scene: it is a status move, so before this round it fell through the old
+  -- heal-only check and its picker listed foes only.
+  --
+  -- A DAMAGING move is deliberately NOT offered an ally, even the one that
+  -- is genuinely ally-supportive -- Pollen Puff. Its ally half (a 50% heal,
+  -- moves.ts:13563-13586) is still an unimplemented structural no-op in this
+  -- engine (combat/modern_status_moves.lua records it), so offering an ally
+  -- for it would run the native DAMAGE path against that ally. It stays
+  -- foe-only until its heal half is wired.
+  mod.exports.isAllyTargetable = function(moveId)
+    if mod.exports.isAllyOnlyMove(moveId) then return true end
+    local info = moveById(moveId)
+    if not info then return false end
+    local archetype = info.target or "selected-pokemon"
+    if archetype ~= "selected-pokemon" then return false end
+    return info.damageClass == "status"
   end
 
   -- needsTargetChoice(moveId) -> boolean. True only for the archetypes that

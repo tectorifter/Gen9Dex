@@ -104,12 +104,12 @@ return function(mod)
   -- is Mon.new + Battle.new -- see gen2_modern_stats.lua). Skip installing
   -- a wrap around a field that doesn't exist there rather than defining a
   -- BattleState.newWild that would error if anything ever called it.
-  if type(BattleState.newWild) ~= "function" then return end
+  if type(rawget(BattleState, "newWild")) ~= "function" then return end
 
   if BattleState.__galarWildModernIvsWrapped then return end
   BattleState.__galarWildModernIvsWrapped = true
 
-  local vanillaNewWild = BattleState.newWild
+  local vanillaNewWild = rawget(BattleState, "newWild")
   function BattleState.newWild(game, species, level, opts)
     local self = vanillaNewWild(game, species, level, opts)
     local mon = self and self.enemy and self.enemy.mon

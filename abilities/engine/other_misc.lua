@@ -1,6 +1,7 @@
 -- Dispatch engine for abilities/data/other_misc.lua -- see that file's
 -- own header for the full, per-ability real-mechanic grounding.
 return function(mod, data)
+  local Strings = require("src.core.Strings")
   local nationalDex = mod.find and mod.find("national_dex")
   assert(nationalDex and nationalDex.exports and nationalDex.exports.moveById,
     "other_misc: national_dex must be loaded first")
@@ -78,7 +79,7 @@ return function(mod, data)
     user.disableTurns = 5
     local battle = ev.battle
     if battle then
-      battle:emit({ kind = "message", text = battle:monName(user) .. "'s move was disabled by the Cursed Body!" })
+      battle:emit({ kind = "message", text = Strings("%s's move was disabled by the Cursed Body!", battle:monName(user)) })
     end
   end)
 
@@ -143,8 +144,7 @@ return function(mod, data)
     end
     if #best == 0 then return end
     local pick = best[love.math.random(1, #best)]
-    battle:emit({ kind = "message", text = battle:monName(mon) .. "'s Forewarn alerted it to "
-      .. battle:monName(pick.foe) .. "'s " .. (pick.move.name or pick.move.id) .. "!" })
+    battle:emit({ kind = "message", text = Strings("%s's Forewarn alerted it to %s's %s!", battle:monName(mon), battle:monName(pick.foe), (pick.move.name or pick.move.id)) })
   end
 
   local function applySwitchInMisc(battle, mon)
@@ -153,7 +153,7 @@ return function(mod, data)
     if not (id and data[id]) then return end
     local gen2 = isGen2Battle(battle)
     if id == "ANTICIPATION" and anticipationShudders(battle, mon, gen2) then
-      battle:emit({ kind = "message", text = battle:monName(mon) .. " shuddered!" })
+      battle:emit({ kind = "message", text = Strings("%s shuddered!", battle:monName(mon)) })
     elseif id == "FOREWARN" then
       applyForewarn(battle, mon)
     elseif id == "SCREENCLEANER" then
@@ -176,7 +176,7 @@ return function(mod, data)
         end
       end
       if cleared then
-        battle:emit({ kind = "message", text = "The Light Screen and Reflect effects disappeared!" })
+        battle:emit({ kind = "message", text = Strings("The Light Screen and Reflect effects disappeared!") })
       end
     end
   end
@@ -237,7 +237,7 @@ return function(mod, data)
     local h = hazardsFor(battle, side)
     if h.toxicSpikes < 2 then
       h.toxicSpikes = h.toxicSpikes + 1
-      battle:emit({ kind = "message", text = "Poison spikes scattered around the opposing team's feet!" })
+      battle:emit({ kind = "message", text = Strings("Poison spikes scattered around the opposing team's feet!") })
     end
   end)
 

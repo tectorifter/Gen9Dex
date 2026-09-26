@@ -152,12 +152,16 @@
 -- patch below installs wherever `effectRecord` exists (Gen 1 and the test
 -- harness), which is exactly where Gen 1 dispatches it from.
 return function(mod)
+  local Strings = require("src.core.Strings")
   assert(mod and mod.exports, "modern_transform: mod table required")
 
   local okState, BattleState = pcall(require, "src.battle.BattleState")
   BattleState = okState and BattleState or nil
-  if not BattleState or type(BattleState.effectRecord) ~= "function" then
-    mod.log:warn("g9-battle-engine: [modern_transform] no Gen-1 BattleState.effectRecord; skipped")
+  if not BattleState or type(rawget(BattleState, "effectRecord")) ~= "function" then
+    mod.log:info("g9-battle-engine: [modern_transform] the live "
+      .. "src.battle.BattleState has no effectRecord (the engine's Gen-2 "
+      .. "facade); Transform's record patch is a Gen-1 dispatch concern, so "
+      .. "there is nothing to patch on this boot -- skipped, not broken")
     return
   end
 
@@ -489,30 +493,25 @@ return function(mod)
   end
   mod.exports.revertTransform = revertTransform
 
-  -- The opposing active for an Imposter on switch-in. The scene's own
-  -- battle.player/enemy can be stale or a raw mon (battle_screen.lua sets
-  -- battle.enemy = the raw mon on an enemy replacement), so this falls through
-  -- to the real active roster.
-  local function opposingOf(battle, battler)
+  -- The foe DIRECTLY OPPOSITE `battler`'s own slot -- the real Imposter rule
+  -- (Showdown abilities.ts:2123 transforms into `pokemon.side.foe.active
+  -- [pokemon.position]`). Asked through the engine's own position seam,
+  -- combat/move_targeting.lua's requestOpposite, which forwards to a battle
+  -- scene's `g9.request_opposite` hook and otherwise answers the native
+  -- two-battler case -- so this file still owns no position data. It never
+  -- falls back to a different foe and NEVER to an ally: when the opposite
+  -- slot is empty or its occupant is not standing, requestOpposite returns
+  -- nil and this returns nil, exactly as Showdown's `if (!target) return
+  -- false` leaves the ability unused.
+  local function oppositeOpponentOf(battle, battler)
     if not (battle and battler) then return nil end
-    local function try(x)
-      local b = battlerFor(battle, x)
-      if b and b ~= battler and b.mon then return b end
-      return nil
-    end
-    local b = (battle.enemy and try(battle.enemy))
-      or (battle.player and try(battle.player))
-    if b then return b end
-    local fn = mod.exports.allActiveBattlers
-    if fn then
-      local ok, actives = pcall(fn, battle)
-      if ok then
-        for _, x in ipairs(actives or {}) do
-          local cand = try(x)
-          if cand then return cand end
-        end
-      end
-    end
+    local requestOpposite = mod.exports.requestOpposite
+    if not requestOpposite then return nil end
+    local raw = battler.mon or battler
+    local ok, target = pcall(requestOpposite, battle, raw)
+    if not ok or target == nil then return nil end
+    local b = battlerFor(battle, target)
+    if b and b ~= battler and b.mon and (b.mon.hp or 0) > 0 then return b end
     return nil
   end
 
@@ -654,7 +653,7 @@ return function(mod)
           text = battle:romText("_TransformedText", "%s\ntransformed into\n%s!",
             monNameOf(user), monNameOf(target))
         end
-        msgs[1] = text or (monNameOf(user) .. " transformed into " .. monNameOf(target) .. "!")
+        msgs[1] = text or Strings("%s transformed into %s!", monNameOf(user), monNameOf(target))
       end
       return msgs
     end
@@ -662,7 +661,7 @@ return function(mod)
     return copy
   end
 
-  local nativeEffectRecord = BattleState.effectRecord
+  local nativeEffectRecord = rawget(BattleState, "effectRecord")
   BattleState.effectRecord = function(self, effect)
     local rec = nativeEffectRecord(self, effect)
     if effect == TRANSFORM_EFFECT then return patchedTransformRecord(rec) end
@@ -711,8 +710,16 @@ return function(mod)
       end
     end
     if #pool == 0 then return nil end
+    -- `battle.rng` is the engine's INCLUSIVE (lo, hi) roller
+    -- (src/battle/BattleState.lua: `function(a, b) return love.math.random(a, b) end`),
+    -- NOT a (battle, lo, hi) helper -- that is Gen 2's separate `battle.random(n)`.
+    -- Passing the battle table as its first argument fed a table straight to
+    -- love.math.random and aborted the battle with "bad argument #2 to 'random'
+    -- (number expected)" the instant a wild Illusion holder rolled its disguise
+    -- (Red-gameplay crash report, 2026-09-24). Every other roll in this mod is
+    -- already rng(lo, hi); this one now is too.
     local rng = battle.rng
-    local index = (type(rng) == "function" and rng(battle, 1, #pool)) or 1
+    local index = (type(rng) == "function" and rng(1, #pool)) or 1
     if index < 1 or index > #pool then index = 1 end
     return pool[index]
   end
@@ -758,9 +765,12 @@ return function(mod)
 
   -- Switch-in dispatch: Illusion first, then Imposter (Showdown fires
   -- both on switch-in; order is cosmetic for a mon that has only one).
-  -- `who`/`opposingWho` may be engine battlers or raw mons: the scene's
+  -- `who` may be an engine battler or a raw mon: the scene's
   -- battle.battler_switched carries the RAW mon, and without normalising here
   -- an Imposter on a scene switch-in never fired at all (battler.mon was nil).
+  -- `opposingWho` is kept in the signature for the callers that pass one, but
+  -- Imposter ignores it: its target is always the foe DIRECTLY OPPOSITE the
+  -- user's slot (oppositeOpponentOf below), never an arbitrary/ally mon.
   local function runSwitchInAbilities(battle, who, opposingWho, opts)
     if not (battle and who) then return end
     local battler = battlerFor(battle, who)
@@ -769,10 +779,14 @@ return function(mod)
     if id == "ILLUSION" then
       setupIllusion(battle, battler)
     elseif id == "IMPOSTER" then
-      local opposing = opposingWho and battlerFor(battle, opposingWho) or nil
-      if not opposing or opposing == battler then
-        opposing = opposingOf(battle, battler)
-      end
+      -- IMPOSTER RULE (Showdown abilities.ts:2123): transform into the foe
+      -- DIRECTLY OPPOSITE this mon's slot -- never another foe, and never an
+      -- ally when that slot is empty. oppositeOpponentOf asks the engine's
+      -- own position seam (combat/move_targeting.lua's requestOpposite, the
+      -- `g9.request_opposite` hook), which a battle scene answers from its
+      -- index-aligned grid; a native battle gets its one opposing battler.
+      -- nil here means "no opponent in that exact slot", so NOTHING happens.
+      local opposing = oppositeOpponentOf(battle, battler)
       if opposing and opposing.mon and (opposing.mon.hp or 0) > 0
          and not battler.transformed then
         applyTransform(battle, battler, opposing)
@@ -857,14 +871,14 @@ return function(mod)
   ------------------------------------------------------------------
   -- Switch-in + teardown wiring (Gen 1 constructors only).
   ------------------------------------------------------------------
-  local wiredGen1 = type(BattleState.newWild) == "function"
-    or type(BattleState.newTrainer) == "function"
+  local wiredGen1 = type(rawget(BattleState, "newWild")) == "function"
+    or type(rawget(BattleState, "newTrainer")) == "function"
 
   if wiredGen1 and not BattleState.__g9TransformWired then
     BattleState.__g9TransformWired = true
 
-    if type(BattleState.newWild) == "function" then
-      local vanillaNewWild = BattleState.newWild
+    if type(rawget(BattleState, "newWild")) == "function" then
+      local vanillaNewWild = rawget(BattleState, "newWild")
       function BattleState.newWild(game, species, level, opts)
         local self = vanillaNewWild(game, species, level, opts)
         if self and not self.dead then
@@ -888,8 +902,8 @@ return function(mod)
       end
     end
 
-    if type(BattleState.newTrainer) == "function" then
-      local vanillaNewTrainer = BattleState.newTrainer
+    if type(rawget(BattleState, "newTrainer")) == "function" then
+      local vanillaNewTrainer = rawget(BattleState, "newTrainer")
       function BattleState.newTrainer(game, oppClass, partyIndex, opts)
         local self = vanillaNewTrainer(game, oppClass, partyIndex, opts)
         if self and not self.dead then

@@ -13,11 +13,12 @@ return {
     },
     known = {
       "work in progress -- additional move sub-effects and mechanics are still being added.",
+      "an unofficial fan mod: Pokemon and all related names and assets are (c) Nintendo / Creatures Inc. / GAME FREAK inc. / The Pokemon Company and this project is not affiliated with or endorsed by them -- see THIRD-PARTY-NOTICES.md",
     },
   },
   credits = {
-    { who = "PokemonShowdown (https://github.com/smogon/pokemon-showdown)",
-      for_ = "every combat mechanic up to gen 9, including all generational gimmick and moves sub effects" },
+    { who = "Pokemon Showdown (https://github.com/smogon/pokemon-showdown, MIT License)",
+      for_ = "the battle formulas and every combat mechanic up to gen 9, including all generational gimmicks and move sub-effects -- this engine is a derivative reimplementation of its sim (see THIRD-PARTY-NOTICES.md for the full MIT licence)" },
   },
   compat = { engine = ">=0.0.0-0 <2.0.0", modApi = 2 },
 }

@@ -2,6 +2,7 @@
 -- file's own header for the full real-mechanic grounding and the
 -- honestly-scoped remainder (Gluttony/Pickup/Symbiosis/Cud Chew).
 return function(mod, data)
+  local Strings = require("src.core.Strings")
   local isGen2Battle = mod.exports.isGen2Battle
   local abilityIdOf = mod.exports.abilityIdOf
   local displayNameFor = mod.exports.displayNameFor
@@ -30,9 +31,7 @@ return function(mod, data)
         local item = itemOf(foe, true)
         if item then
           local def = battle:itemDef(item)
-          battle:emit({ kind = "message", text = displayNameFor(battle, mon, true)
-            .. " frisked " .. displayNameFor(battle, foe, true)
-            .. " and found its " .. (def and def.name or item) .. "!" })
+          battle:emit({ kind = "message", text = Strings("%s frisked %s and found its %s!", displayNameFor(battle, mon, true), displayNameFor(battle, foe, true), (def and def.name or item)) })
         end
       end
     elseif id == "HARVEST" then
@@ -72,8 +71,7 @@ return function(mod, data)
     local def = battle:itemDef(item)
     victim.item = nil
     stealer.item = item
-    battle:emit({ kind = "message", text = stealerName .. " stole " .. victimName
-      .. "'s " .. (def and def.name or item) .. "!" })
+    battle:emit({ kind = "message", text = Strings("%s stole %s's %s!", stealerName, victimName, (def and def.name or item)) })
   end
 
   mod.events:on("battle.damage_dealt", function(ev)
@@ -106,8 +104,7 @@ return function(mod, data)
         if love.math.random(1, 100) <= chance then
           mon.item = mon.ggdLastConsumedItem
           local def = battle:itemDef(mon.item)
-          battle:emit({ kind = "message", text = displayNameFor(battle, mon, true)
-            .. "'s Harvest grew a fresh " .. (def and def.name or mon.item) .. "!" })
+          battle:emit({ kind = "message", text = Strings("%s's Harvest grew a fresh %s!", displayNameFor(battle, mon, true), (def and def.name or mon.item)) })
         end
       end
     end

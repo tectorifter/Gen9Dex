@@ -34,6 +34,7 @@
 -- not re-setting an already-matching weather rather than emitting
 -- anything.
 return function(mod, data)
+  local Strings = require("src.core.Strings")
   local setWeather = mod.exports.setWeather
   local currentWeather = mod.exports.currentWeather
   local canSetWeather = mod.exports.canSetWeather
@@ -71,7 +72,7 @@ return function(mod, data)
     local turns = resolveFieldDuration(mon, FIELD_BASE_TURNS, FIELD_EXTENDED_TURNS,
       WEATHER_EXTEND_ITEM[weather])
     setWeather(battle, true, weather, turns, mon)
-    battle:emit({ kind = "message", text = battle:monName(mon) .. "'s ability changed the weather!" })
+    battle:emit({ kind = "message", text = Strings("%s's ability changed the weather!", battle:monName(mon)) })
   end
 
   -- Round 338: Transform/Imposter re-run this for the ability it copied.

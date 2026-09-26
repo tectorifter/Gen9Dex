@@ -27,6 +27,7 @@
 -- NOT specified by the user -- a reasonable default filled in here,
 -- flagged as an inferred value rather than a stated one.
 return function(mod, GimmickRing)
+  local Strings = require("src.core.Strings")
   local BattleState = require("src.battle.BattleState")
 
   -- Confirmed bug, fixed here: this used to be `if BattleState
@@ -494,7 +495,7 @@ return function(mod, GimmickRing)
       user.maxGuardStreak = 0
       if n.gen2 then
         n.battle:markMissed()
-        n.battle:emit({ kind = "message", text = "But it failed!" })
+        n.battle:emit({ kind = "message", text = Strings("But it failed!") })
         return {}
       end
       return { n.battle:romText("_ButItFailedText", "But, it failed!") }
@@ -527,7 +528,7 @@ return function(mod, GimmickRing)
           local st = gState[battle]
           if defender == battle.player and st and st.active then
             battle:markMissed()
-            battle:emit({ kind = "message", text = "But it failed!" })
+            battle:emit({ kind = "message", text = Strings("But it failed!") })
             return
           end
           return nativeEncoreEffect(battle, attacker, defender, def, moveId, sureHit)
@@ -650,12 +651,14 @@ return function(mod, GimmickRing)
   -- back to 100% -- this battler's next attempt (this battle, or a fresh
   -- mon after a switch) starts fresh.
   if not skipGen1 then
-  local vanillaPerformMove = BattleState.performMove
+  local vanillaPerformMove = rawget(BattleState, "performMove")
+  if type(vanillaPerformMove) == "function" then
   function BattleState:performMove(user, target, moveInst, isCalled)
     if moveInst and moveInst.id ~= MAXGUARD_ID then
       user.maxGuardStreak = nil
     end
     return vanillaPerformMove(self, user, target, moveInst, isCalled)
+  end
   end
   end
 

@@ -331,7 +331,7 @@ return function(mod)
         if type(layers) ~= "number" then layers = 0 end
         if layers < 3 then
           battle.spikes[side] = layers + 1
-          say(battle, "Spikes were scattered all around!", gen2)
+          say(battle, Strings("Spikes were scattered all around!"), gen2)
         end
       end
     end)

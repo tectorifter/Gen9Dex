@@ -699,7 +699,7 @@ return function(mod)
                 local name = displayNameOf(battle, who, gen2)
                 if gen2 then
                   m.hp = math.max(0, m.hp - dmg)
-                  battle:emit({ kind = "message", text = name .. " is hurt by the G-Max move!" })
+                  battle:emit({ kind = "message", text = Strings("%s is hurt by the G-Max move!", name) })
                   battle:emit({ kind = "damage", side = side, amount = dmg, hp = m.hp, anim = false })
                 else
                   battle:applyDamage(who, dmg)

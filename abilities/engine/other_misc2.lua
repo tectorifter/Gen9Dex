@@ -1,6 +1,7 @@
 -- Dispatch engine for abilities/data/other_misc2.lua -- see that file's
 -- own header for the full real-mechanic grounding.
 return function(mod, data)
+  local Strings = require("src.core.Strings")
   local nationalDex = mod.find and mod.find("national_dex")
   assert(nationalDex and nationalDex.exports and nationalDex.exports.moveFlags,
     "other_misc2: national_dex must be loaded first")
@@ -23,7 +24,7 @@ return function(mod, data)
     if target.perishSongTurns or user.perishSongTurns then return end -- real gate: neither side already counting down
     target.perishSongTurns = 3
     user.perishSongTurns = 3
-    battle:emit({ kind = "message", text = "Both Pokémon will faint in two turns!" })
+    battle:emit({ kind = "message", text = Strings("Both Pokémon will faint in two turns!") })
   end)
 
   ------------------------------------------------------------------

@@ -898,6 +898,9 @@ local CUSTOM_EFFECT_PATCH = {
   -- override lives in the crit-stage chain, keyed off the `alwaysCrit` field
   -- main.lua itself patches from national_dex's critRate sentinel).
   LASERFOCUS = "GALAR_LASERFOCUS_EFFECT",
+  -- Dragon Cheer (4.6.7): the ally-side crit volatile, now that real
+  -- ally slots exist. Retired from combat/structural_exemptions.lua.
+  DRAGONCHEER = "GALAR_DRAGONCHEER_EFFECT",
   -- combat/modern_movepool_stages.lua -- Phase 15 (missing-effects plan):
   -- self stat-stage boosts plus the target-directed drops sharing the
   -- primitive. national_dex leaves all 19 at statChance = 0, so the
@@ -913,6 +916,11 @@ local CUSTOM_EFFECT_PATCH = {
   DEFENDORDER = "GMAX_DEFENDORDER_EFFECT",
   SHELTER = "GMAX_SHELTER_EFFECT",
   HOWL = "GMAX_HOWL_EFFECT",
+  -- Coaching (4.6.7): Atk +1 / Def +1 to every adjacent ALLY (never
+  -- the user) -- the real game rule, which national_dex's own
+  -- "user-and-allies" label and Showdown's `adjacentAlly` each only half
+  -- describe. Wired through modern_movepool_stages.lua's teamBoostMove.
+  COACHING = "GMAX_COACHING_EFFECT",
   TICKLE = "GMAX_TICKLE_EFFECT",
   FEATHERDANCE = "GMAX_FEATHERDANCE_EFFECT",
   BABYDOLLEYES = "GMAX_BABYDOLLEYES_EFFECT",
@@ -1242,17 +1250,13 @@ return function(mod)
     return loadSibling("combat/multi_hit.lua")(mod)
   end)
 
-  -- Move-effect id-space completion: the loader's crossValidate pass reads
-  -- every `moves.<id>.effect` as a reference into the CURRENT generation's
-  -- move_effects registry, and the engine's own seed of that id space runs
-  -- from src.mods.Builtins BEFORE any mod registers a move -- so a modded
-  -- move's effect id (the Gen 1 NO_ADDITIONAL_EFFECT no-op, or a record
-  -- national_dex ships with an effect Gold has no id for) dangles and logs one
-  -- line per move. This seeds the same bare kind="full" marker the engine uses
-  -- for its own ROM moves. See combat/move_effect_markers.lua.
-  boot("move_effect_markers", function()
-    return loadSibling("combat/move_effect_markers.lua")(mod)
-  end)
+  -- Move-effect id-space completion now runs at the very END of the boot (see
+  -- the Phase G block below): it must seed a marker only for ids NOTHING else
+  -- registered, so it has to see every modern_* module's own move_effects
+  -- registration first. Running it here -- before those modules -- made it
+  -- seed a bare marker for each effect id a patched move record references,
+  -- and the module that then tried to register the REAL record failed with
+  -- "move_effects already registered". See combat/move_effect_markers.lua.
 
   -- Learnset ownership: the real teachability gate. Its install returns a
   -- table with .isUsable / .reapplyLearnsets; reapplyLearnsets() patches
@@ -1987,6 +1991,24 @@ return function(mod)
   end)
   boot("modern_effect_guard", function()
     return loadSibling("combat/modern_effect_guard.lua")(mod)
+  end)
+
+  -- --------------------------------------------------------------------------
+  -- Move-effect id-space completion, LAST (round 349). The loader's
+  -- crossValidate pass reads every `moves.<id>.effect` as a reference into the
+  -- CURRENT generation's move_effects registry, and the engine's own seed runs
+  -- from src.mods.Builtins BEFORE any mod registers a move -- so a modded
+  -- move's effect id (Gen 1's NO_ADDITIONAL_EFFECT no-op, or any id a re-owned
+  -- national_dex record carries) would otherwise dangle and log one line per
+  -- move. It seeds a bare kind="full" marker for ids with no record, and it
+  -- MUST run after every modern_* module: those modules register the REAL
+  -- records for ids the patched move records reference (GALAR_MINIMIZE_EFFECT,
+  -- GALAR_BIDE_EFFECT, GMAX_AROMATICMIST_EFFECT, ...), and seeding a marker
+  -- first made `effects:register` reject the real record.
+  -- See combat/move_effect_markers.lua.
+  -- --------------------------------------------------------------------------
+  boot("move_effect_markers", function()
+    return loadSibling("combat/move_effect_markers.lua")(mod)
   end)
 
   -- --------------------------------------------------------------------------

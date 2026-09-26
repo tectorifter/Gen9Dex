@@ -12,7 +12,7 @@
 -- (fetched 2026-08-23 from the real, MIT-licensed public repo, not
 -- recalled from memory), specifically Pokemon#damage/#heal/#setStatus/
 -- #cureStatus/#trySetStatus/#addVolatile/#removeVolatile/#boostBy/#faint
--- and Battle#randomChance.
+-- and Battle#randomChance. MIT-licensed: see THIRD-PARTY-NOTICES.md.
 --
 -- SCOPE: only meant to be consulted while g9-battle-engine's own Gen
 -- 9 combat-mode toggle is on for a given battle -- native Gen2 combat

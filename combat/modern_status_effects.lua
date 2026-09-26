@@ -384,9 +384,9 @@ return function(mod)
       local vol = self:volatile(mon)
       if vol.attract then
         local name = self:monName(mon)
-        self:emit({ kind = "message", text = name .. " is in love with the foe!" })
+        self:emit({ kind = "message", text = Strings("%s is in love with the foe!", name) })
         if self:roller()(256) < 128 then
-          self:emit({ kind = "message", text = name .. " is immobilized by love!" })
+          self:emit({ kind = "message", text = Strings("%s is immobilized by love!", name) })
           return false
         end
       end
@@ -430,12 +430,12 @@ return function(mod)
         local statusMove, def = isStatusMove(self, true, moveId)
         if vol.tauntTurns and statusMove then
           self:emit({ kind = "message",
-            text = name .. " can't use " .. ((def and def.name) or moveId) .. " after the TAUNT!" })
+            text = Strings("%s can't use %s after the TAUNT!", name, ((def and def.name) or moveId)) })
           return
         end
         if vol.tormented and moveId == vol.lastMove then
           self:emit({ kind = "message",
-            text = name .. " can't use the same move twice in a row!" })
+            text = Strings("%s can't use the same move twice in a row!", name) })
           return
         end
       end
@@ -452,7 +452,7 @@ return function(mod)
         vol.tauntTurns = vol.tauntTurns - 1
         if vol.tauntTurns <= 0 then
           vol.tauntTurns = nil
-          self:emit({ kind = "message", text = self:monName(mon) .. "'s TAUNT wore off!" })
+          self:emit({ kind = "message", text = Strings("%s's TAUNT wore off!", self:monName(mon)) })
         end
       end
     end

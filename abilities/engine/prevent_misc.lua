@@ -28,6 +28,7 @@
 -- everything else (the stat_multiplier.lua boost itself, any other real
 -- consumer of Battle.statusPenaltyFor) is fully fixed on Gen 2.
 return function(mod, data)
+  local Strings = require("src.core.Strings")
   local abilityIdOf = mod.exports.abilityIdOf
   assert(abilityIdOf, "prevent_misc: ability_dispatch.lua must load first")
 
@@ -77,12 +78,12 @@ return function(mod, data)
   local nativeUseMovePreventMisc = Battle.useMove
   function Battle:useMove(attacker, defender, moveId)
     if EXPLOSIVE_MOVES[moveId] and anyBattlerHasDamp(self) then
-      self:emit({ kind = "message", text = "But, it failed!" })
+      self:emit({ kind = "message", text = Strings("But it failed!") })
       return
     end
     -- Phase 14: Suction Cups / Guard Dog block Roar/Whirlwind.
     if FORCE_SWITCH_MOVES[moveId] and anyBattlerBlocksForcedSwitch(self) then
-      self:emit({ kind = "message", text = "But, it failed!" })
+      self:emit({ kind = "message", text = Strings("But it failed!") })
       return
     end
     if attacker and data.GORILLATACTICS and abilityIdOf(attacker) == "GORILLATACTICS" then

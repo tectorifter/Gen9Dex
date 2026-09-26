@@ -28,6 +28,7 @@
 -- every real terrain rule exempts a semi-invulnerable target/attacker, not
 -- guessed at here.
 return function(mod)
+  local Strings = require("src.core.Strings")
   local gen2Ok_Battle, Battle = pcall(require, "src.battle.gen2.Battle")
   Battle = gen2Ok_Battle and Battle or nil
   local curTypesOf = mod.exports.curTypesOf
@@ -104,7 +105,7 @@ return function(mod)
       battle.terrainTurns = math.huge
       battle.terrainBossLocked = true
     end
-    battle:emit({ kind = "message", text = startText })
+    battle:emit({ kind = "message", text = Strings(startText) })
     -- Shared notification (same idiom modern_combat.lua's own setWeather
     -- just added for this session's Phase 1.8): fired on every explicit
     -- terrain change this function makes. Terrain's own natural expiry
@@ -124,7 +125,7 @@ return function(mod)
       kind = "primary",
       run = function(battle, attacker, defender, def, moveId, sureHit)
         if not mod.exports.setTerrain(battle, attacker, key, startText) then
-          battle:emit({ kind = "message", text = "But it failed!" })
+          battle:emit({ kind = "message", text = Strings("But it failed!") })
         end
       end,
     })
@@ -176,7 +177,7 @@ return function(mod)
             end
             if restored > 0 then
               battle:emit({ kind = "message",
-                text = battle:monName(mon) .. "'s HP was restored by the Grassy Terrain!" })
+                text = Strings("%s's HP was restored by the Grassy Terrain!", battle:monName(mon)) })
             end
           end
         end
@@ -188,7 +189,7 @@ return function(mod)
       local ended = battle.terrain
       battle.terrain = nil
       battle.terrainTurns = nil
-      battle:emit({ kind = "message", text = TERRAIN_END_TEXT[ended] or "The terrain disappeared." })
+      battle:emit({ kind = "message", text = Strings(TERRAIN_END_TEXT[ended] or "The terrain disappeared.") })
       -- Direct field write, not routed through setTerrain (see that
       -- function's own header) -- fired here instead, so every terrain
       -- transition is covered between the two emission points.
@@ -215,11 +216,11 @@ return function(mod)
     local nativeApplyStatus = Battle.applyStatus
     function Battle:applyStatus(mon, status, source)
       if self.terrain == "ELECTRIC" and status == "slp" and affectedByTerrain(self, mon) then
-        self:emit({ kind = "message", text = "The Electric Terrain prevents sleep!" })
+        self:emit({ kind = "message", text = Strings("The Electric Terrain prevents sleep!") })
         return false
       end
       if self.terrain == "MISTY" and affectedByTerrain(self, mon) then
-        self:emit({ kind = "message", text = "The Misty Terrain protects against status!" })
+        self:emit({ kind = "message", text = Strings("The Misty Terrain protects against status!") })
         return false
       end
       return nativeApplyStatus(self, mon, status, source)
@@ -228,7 +229,7 @@ return function(mod)
     local nativeApplyConfusion = Battle.applyConfusion
     function Battle:applyConfusion(mon, turns, source)
       if self.terrain == "MISTY" and affectedByTerrain(self, mon) then
-        self:emit({ kind = "message", text = "The Misty Terrain protects against confusion!" })
+        self:emit({ kind = "message", text = Strings("The Misty Terrain protects against confusion!") })
         return false
       end
       return nativeApplyConfusion(self, mon, turns, source)
@@ -258,7 +259,7 @@ return function(mod)
         local priority = self:movePriority(moveId, attacker)
         if priority and priority > 0 and affectedByTerrain(self, defender) then
           self:emit({ kind = "message",
-            text = self:monName(defender) .. " surrounds itself with psychic terrain!" })
+            text = Strings("%s surrounds itself with psychic terrain!", self:monName(defender)) })
           return
         end
       end

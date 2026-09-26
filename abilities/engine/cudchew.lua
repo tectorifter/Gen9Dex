@@ -24,6 +24,7 @@
 -- items only in Gen 2+), so this whole engine is gated to gen2 battles
 -- -- matching how modern_items.lua's own berry logic is gated.
 return function(mod, data)
+  local Strings = require("src.core.Strings")
   local abilityIdOf = mod.exports.abilityIdOf
   local isGen2Battle = mod.exports.isGen2Battle
   local allActiveBattlers = mod.exports.allActiveBattlers
@@ -68,7 +69,7 @@ return function(mod, data)
             local healed = battle:heal(mon, amount, { anim = "RECOVER" })
             if healed > 0 then
               battle:emit({ kind = "message",
-                text = displayNameFor(battle, mon, true) .. " regurgitated and ate its Berry again!" })
+                text = Strings("%s regurgitated and ate its Berry again!", displayNameFor(battle, mon, true)) })
             end
           end
         else

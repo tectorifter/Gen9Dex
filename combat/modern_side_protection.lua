@@ -334,7 +334,7 @@ return function(mod)
             -- moves.ts:11003 `if (source.activeMoveActions > 1)`.
             local mu = user.mon or user
             if (mu.__g9MoveActions or 0) > 1 then
-              emit(battle, "But it failed!")
+              emit(battle, Strings("But it failed!"))
               return
             end
           end
@@ -350,7 +350,7 @@ return function(mod)
               end
             end
           end
-          emit(battle, cfg.start)
+          emit(battle, Strings(cfg.start))
         end,
       })
       mod.content.moves:patch(guardMoveId, { effect = cfg.effect })
@@ -398,7 +398,7 @@ return function(mod)
         return {
           kind = "primary",
           run = function(battle)
-            emit(battle, GUARD_BLOCK_TEXT[reason])
+            emit(battle, Strings(GUARD_BLOCK_TEXT[reason]))
           end,
         }
       end
@@ -437,12 +437,11 @@ return function(mod)
       local screens = battle.screens[side] or {}
       battle.screens[side] = screens
       if (screens.safeguard or 0) > 0 then
-        emit(battle, "But it failed!")
+        emit(battle, Strings("But it failed!"))
         return
       end
       screens.safeguard = (Battle and Battle.SCREEN_TURNS) or 5
-      emit(battle, nameOf(battle, user) ..
-        "'s team became cloaked in mystical mist!")
+      emit(battle, Strings("%s's team became cloaked in mystical mist!", nameOf(battle, user)))
     end,
   })
   mod.content.moves:patch("SAFEGUARD", { effect = "GALAR_SAFEGUARD_EFFECT" })
@@ -533,7 +532,7 @@ return function(mod)
           local side = sideOfWho(battle, target, true)
           local list = futureStore(battle, side)
           if #list > 0 then
-            emit(battle, "But it failed!")
+            emit(battle, Strings("But it failed!"))
             return
           end
           list[#list + 1] = {
@@ -542,7 +541,7 @@ return function(mod)
             damage = rollFutureDamage(battle, user, target, cfg),
             resolveTurn = (battle.turn or 0) + 1,
           }
-          emit(battle, string.format(cfg.start, nameOf(battle, user)))
+          emit(battle, Strings(cfg.start, nameOf(battle, user)))
         end,
       })
       mod.content.moves:patch(futureMoveId, { effect = cfg.effect })
@@ -562,7 +561,7 @@ return function(mod)
             local cfg = FUTURE_MOVES[fm.move] or {}
             local target = battle[side]
             if (not target) or (target.hp or 0) <= 0 or target == fm.source then
-              emit(battle, cfg.fail or "The attack did not hit!")
+              emit(battle, Strings(cfg.fail or "The attack did not hit!"))
             else
               -- conditions.ts:394-395: the future attack strips Protect
               -- and Endure before landing.
@@ -572,7 +571,7 @@ return function(mod)
               end
               target.protected = nil
               target.maxGuarded = nil
-              emit(battle, string.format(cfg.hit or "%s was hit!", nameOf(battle, target)))
+              emit(battle, Strings(cfg.hit or "%s was hit!", nameOf(battle, target)))
               if battle.dealDamage then
                 battle:dealDamage(fm.source, target, fm.damage or 1, {})
               else
@@ -622,11 +621,11 @@ return function(mod)
           local tryHeal = mod.exports.g9TryHeal
           if tryHeal then
             if tryHeal(ctx.battle, ctx.target, amount) > 0 then
-              emit(ctx.battle, nameOf(ctx.battle, ctx.target) .. " regained health!")
+              emit(ctx.battle, Strings("%s regained health!", nameOf(ctx.battle, ctx.target)))
             end
           else
             m.hp = math.min(maxHp, (m.hp or 0) + amount)
-            emit(ctx.battle, nameOf(ctx.battle, ctx.target) .. " regained health!")
+            emit(ctx.battle, Strings("%s regained health!", nameOf(ctx.battle, ctx.target)))
           end
         end
         -- Deals no damage at all in the heal tier.

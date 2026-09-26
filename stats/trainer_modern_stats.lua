@@ -126,12 +126,12 @@ return function(mod)
   -- Skip installing a wrap around a field that doesn't exist there rather
   -- than defining a BattleState.newTrainer that would error if anything
   -- ever called it.
-  if type(BattleState.newTrainer) ~= "function" then return end
+  if type(rawget(BattleState, "newTrainer")) ~= "function" then return end
 
   if BattleState.__galarTrainerModernStatsWrapped then return end
   BattleState.__galarTrainerModernStatsWrapped = true
 
-  local vanillaNewTrainer = BattleState.newTrainer
+  local vanillaNewTrainer = rawget(BattleState, "newTrainer")
   function BattleState.newTrainer(game, oppClass, partyIndex)
     local self = vanillaNewTrainer(game, oppClass, partyIndex)
     if self and self.enemyParty then

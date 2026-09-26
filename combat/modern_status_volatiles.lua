@@ -92,6 +92,18 @@ return function(mod)
   assert(changeStage and displayNameFor,
     "modern_status_volatiles: modern_combat.lua must load first")
 
+  -- A move id's on-screen name -- the same id->display-name step
+  -- combat/modern_status_moves.lua's own moveNameOf does. Needed by the
+  -- Disable line below.
+  local function moveNameOf(battle, moveId)
+    if not moveId then return "move" end
+    local ok, def = pcall(battle.moveDef, battle, moveId)
+    if ok and def and def.name then return def.name end
+    local ok2, info = pcall(moveById, moveId)
+    if ok2 and info and info.name then return info.name end
+    return tostring(moveId)
+  end
+
   local function hpOf(mon) return (mon.mon or mon) end
   local function healFractionOf(battle, mon, denom)
     local m = hpOf(mon)
@@ -228,7 +240,7 @@ return function(mod)
       end
       n.target.leechSeeded = true
       n.target.leechSeedSource = n.user
-      return { Strings("%s\nwas seeded!", "") }
+      return { Strings("%s\nwas seeded!", displayNameFor(n.battle, n.target, n.gen2)) }
     end,
   })
   mod.content.move_effects:register("GALAR_INGRAIN_EFFECT", {
@@ -236,7 +248,7 @@ return function(mod)
     run = function(a, b, c)
       local n = normalize(a, b, c)
       n.user.ingrained = true
-      return { Strings("%s\nplanted its roots!", "") }
+      return { Strings("%s\nplanted its roots!", displayNameFor(n.battle, n.user, n.gen2)) }
     end,
   })
   mod.content.move_effects:register("GALAR_NIGHTMARE_EFFECT", {
@@ -260,7 +272,7 @@ return function(mod)
         return { romText(n.battle.data, "_ButItFailedText", "But, it failed!") }
       end
       n.target.yawnTurns = 2
-      return { Strings("%s\ngrew drowsy!", "") }
+      return { Strings("%s\ngrew drowsy!", displayNameFor(n.battle, n.target, n.gen2)) }
     end,
   })
   mod.events:on("battle.turn_ended", function(ev)
@@ -309,7 +321,7 @@ return function(mod)
       end
       target.disabledMoveId = lastMove
       target.disableTurns = 5
-      return { Strings("%s's\n%s was disabled!", "") }
+      return { Strings("%s's\n%s was disabled!", displayNameFor(n.battle, target, n.gen2), moveNameOf(n.battle, lastMove)) }
     end,
   })
 
@@ -324,7 +336,7 @@ return function(mod)
         local n = normalize(a, b, c)
         if not n.target then return {} end
         n.target[field] = turns
-        return { Strings(successMsg, "") }
+        return { Strings(successMsg, displayNameFor(n.battle, n.target, n.gen2)) }
       end,
     })
   end
@@ -344,7 +356,9 @@ return function(mod)
       if not ev.target then return end
       ev.target[field] = turns
       if successMsg then
-        ev.battle:emit({ kind = "message", text = Strings(successMsg, "") })
+        ev.battle:emit({ kind = "message", text = Strings(successMsg,
+          displayNameFor(ev.battle, ev.target,
+            mod.exports.isGen2Battle and mod.exports.isGen2Battle(ev.battle))) })
       end
     end)
   end
@@ -393,16 +407,16 @@ return function(mod)
         local flags = moveFlags(moveId)
         if flags then
           if attacker.healBlockTurns and flags.heal then
-            self:emit({ kind = "message", text = self:monName(attacker) .. " can't use healing moves!" })
+            self:emit({ kind = "message", text = Strings("%s can't use healing moves!", self:monName(attacker)) })
             return
           end
           if attacker.throatChopTurns and flags.sound then
-            self:emit({ kind = "message", text = self:monName(attacker) .. " can't use sound moves!" })
+            self:emit({ kind = "message", text = Strings("%s can't use sound moves!", self:monName(attacker)) })
             return
           end
         end
         if attacker.disabledMoveId and attacker.disabledMoveId == moveId then
-          self:emit({ kind = "message", text = self:monName(attacker) .. "'s move is disabled!" })
+          self:emit({ kind = "message", text = Strings("%s's move is disabled!", self:monName(attacker)) })
           return
         end
       end
@@ -423,7 +437,7 @@ return function(mod)
           mon.perishSongTurns = 4
         end
       end
-      return { Strings("All Pokémon caught in the\nmusic will faint in three turns!", "") }
+      return { Strings("All Pokémon caught in the\nmusic will faint in three turns!") }
     end,
   })
   mod.events:on("battle.turn_ended", function(ev)
@@ -436,7 +450,7 @@ return function(mod)
           mon.perishSongTurns = nil
           local m = hpOf(mon)
           m.hp = 0
-          battle:emit({ kind = "message", text = battle:monName(mon) .. "'s perish count fell to zero!" })
+          battle:emit({ kind = "message", text = Strings("%s's perish count fell to zero!", battle:monName(mon)) })
           if battle.onFaint then battle:onFaint(mon) end
         end
       end
@@ -541,7 +555,7 @@ return function(mod)
         return { Strings("It doesn't affect\n%s...", displayNameFor(n.battle, n.target, n.gen2)) }
       end
       n.target.telekinesisTurns = 3
-      return { Strings("%s was made\nto float!", "") }
+      return { Strings("%s was made\nto float!", displayNameFor(n.battle, n.target, n.gen2)) }
     end,
   })
   mod.events:on("battle.turn_ended", function(ev)
@@ -666,7 +680,7 @@ return function(mod)
       end
       local denom = ({ 4, 2, 1 })[layers]
       healFractionOf(user, denom)
-      local msgs = { Strings("%s\nswallowed!", "") }
+      local msgs = { Strings("%s\nswallowed!", displayNameFor(n.battle, user, n.gen2)) }
       for _, m in ipairs(changeStage(n.battle, user, "defense", -layers, false, n.gen2)) do msgs[#msgs + 1] = m end
       for _, m in ipairs(changeStage(n.battle, user, "spd", -layers, false, n.gen2)) do msgs[#msgs + 1] = m end
       user.stockpileLayers = nil

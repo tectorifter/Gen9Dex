@@ -65,6 +65,7 @@
 -- this mod's production target is Gen 2 only; isGen2Battle gates it
 -- rather than half-building a Gen 1 path.
 return function(mod)
+  local Strings = require("src.core.Strings")
   local abilityIdOf = mod.exports.abilityIdOf
   local displayNameFor = mod.exports.displayNameFor
   local isGen2Battle = mod.exports.isGen2Battle
@@ -93,17 +94,17 @@ return function(mod)
     local id = abilityIdOf(target)
     if id == "SUCTIONCUPS" then
       battle:emit({ kind = "message",
-        text = displayNameFor(battle, target, true) .. "'s Suction Cups anchors it!" })
+        text = Strings("%s's Suction Cups anchors it!", displayNameFor(battle, target, true)) })
       return true
     end
     if id == "GUARDDOG" then
       battle:emit({ kind = "message",
-        text = displayNameFor(battle, target, true) .. "'s Guard Dog anchors it!" })
+        text = Strings("%s's Guard Dog anchors it!", displayNameFor(battle, target, true)) })
       return true
     end
     if target.ingrained then
       battle:emit({ kind = "message",
-        text = displayNameFor(battle, target, true) .. " is anchored by its roots!" })
+        text = Strings("%s is anchored by its roots!", displayNameFor(battle, target, true)) })
       return true
     end
     return false
@@ -128,7 +129,7 @@ return function(mod)
       if not (pick and battle.switchMonAtSide) then return false end
       local name = displayNameFor(battle, target, true)
       if not battle:switchMonAtSide("enemy", pick.index) then return false end
-      battle:emit({ kind = "message", text = name .. " was dragged out!" })
+      battle:emit({ kind = "message", text = Strings("%s was dragged out!", name) })
       return true
     end
     -- Player side: requestSwitch raises the real forced-switch request the
@@ -139,7 +140,7 @@ return function(mod)
     if #benchOf(battle.party, battle.playerIndex) == 0 then return false end
     local name = displayNameFor(battle, target, true)
     return requestSwitch(battle, target, { reason = moveId,
-      text = name .. " was dragged out!" }) and true or false
+      text = Strings("%s was dragged out!", name) }) and true or false
   end
 
   for id in pairs(DRAG_MOVES) do

@@ -152,7 +152,8 @@ return function(mod, data)
   end
 
   local BattleState = require("src.battle.BattleState")
-  local nativePerformMovePressure = BattleState.performMove
+  local nativePerformMovePressure = rawget(BattleState, "performMove")
+  if type(nativePerformMovePressure) == "function" then
   function BattleState:performMove(user, target, moveInst, isCalled)
     local ppBefore = moveInst and moveInst.pp
     local result = nativePerformMovePressure(self, user, target, moveInst, isCalled)
@@ -163,6 +164,7 @@ return function(mod, data)
       end
     end
     return result
+  end
   end
 
   mod.log:info("g9-battle-engine: pressure installed (PRESSURE, both engines; mustpressure read live from national_dex moveFlags)")

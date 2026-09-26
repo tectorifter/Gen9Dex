@@ -215,12 +215,29 @@ return function(mod)
   -- mirror alone still makes our type win in the AUTO case -- and the
   -- failure is logged, never fatal.
   local BF_GATE_MARK = "__g9BattleFormsTeraOwned"
+  local bfGateUnavailable = false
   mod.exports.ensureBattleFormsGate = function()
     local ok, bfMod = pcall(function() return mod.find and mod.find("battle_forms") end)
     if not ok or type(bfMod) ~= "table" then return false end
     local options = bfMod.options
     if type(options) ~= "table" or type(options.get) ~= "function" then
-      mod.log:warn("galar_gmax_dex: tera_state: battle_forms present but its options.get is not a patchable field; TERA TYPE dev override stays as battle_forms set it")
+      -- Expected, not a fault: src.mods.Loader's api.find hands back a
+      -- HANDLE -- { id, version, exports } -- never the other mod's own mod
+      -- table, so `options` is simply not exposed cross-mod by design. The
+      -- per-mon stamp mirror above is the real ownership seam: battle_forms'
+      -- src/teratype.lua consults mon.battleFormsTeraType before its own DVs
+      -- fallback, and ensureTeraStamps pre-stamps every battler, so on the
+      -- AUTO default (where it deploys our stamp) the engine owns the type.
+      -- A concrete TERA TYPE choice stays battle_forms' own documented dev
+      -- override -- tell the player to keep it on AUTO. Logged once.
+      if not bfGateUnavailable then
+        bfGateUnavailable = true
+        mod.log:info("galar_gmax_dex: tera_state: battle_forms' options table "
+          .. "is not reachable through mod.find (the loader hands back a "
+          .. "{ id, version, exports } handle, by design); the per-mon "
+          .. "battleFormsTeraType stamp is what carries the engine's type, so "
+          .. "keep battle_forms' TERA TYPE option on AUTO")
+      end
       return false
     end
     if options[BF_GATE_MARK] then return true end

@@ -253,11 +253,11 @@ return function(mod)
       local layers = self.spikes[side] or 0
       if layers >= 3 then
         self:markMissed()
-        self:emit({ kind = "message", text = "But it failed!" })
+        self:emit({ kind = "message", text = Strings("But it failed!") })
         return
       end
       self.spikes[side] = layers + 1
-      self:emit({ kind = "message", text = "Spikes were scattered all around!" })
+      self:emit({ kind = "message", text = Strings("Spikes were scattered all around!") })
     end
   end
 
@@ -282,7 +282,7 @@ return function(mod)
       local damage = math.max(1, math.floor(fraction * maxHp / 24))
       mon.hp = math.max(0, mon.hp - damage)
       self:emit({ kind = "message",
-        text = self:monName(mon) .. " is hurt by SPIKES!" })
+        text = Strings("%s is hurt by SPIKES!", self:monName(mon)) })
       self:emit({ kind = "damage", side = side, amount = damage, hp = mon.hp,
         anim = false })
     end
@@ -398,7 +398,7 @@ return function(mod)
           if gen2 then
             mon.hp = math.max(0, mon.hp - damage)
             battle:emit({ kind = "message",
-              text = name .. " is hurt by pointed stones!" })
+              text = Strings("%s is hurt by pointed stones!", name) })
             battle:emit({ kind = "damage", side = side, amount = damage,
               hp = mon.hp, anim = false })
           else
@@ -424,7 +424,7 @@ return function(mod)
           if gen2 then
             mon.hp = math.max(0, mon.hp - damage)
             battle:emit({ kind = "message",
-              text = name .. " is hurt by the sharp steel!" })
+              text = Strings("%s is hurt by the sharp steel!", name) })
             battle:emit({ kind = "damage", side = side, amount = damage,
               hp = mon.hp, anim = false })
           else

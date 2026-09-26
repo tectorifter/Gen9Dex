@@ -82,6 +82,7 @@
 -- there. (Historically this file carried a "RESERVED, no enforcement" note
 -- here; the Heal Block move and this flag are both real now.)
 return function(mod)
+  local Strings = require("src.core.Strings")
   local StatusRegistry = require("src.battle.StatusRegistry")
   local bossFightHas = mod.exports.bossFightHas
   assert(bossFightHas, "boss_fight_status: combat/boss_fight.lua must load first")
@@ -204,7 +205,7 @@ return function(mod)
       mod.exports.isGen2Battle and mod.exports.isGen2Battle(battle)))
       or (userMon.name or "The Pokemon")
     battle:emit({ kind = "message",
-      text = name .. " was hurt trying to drain the boss!" })
+      text = Strings("%s was hurt trying to drain the boss!", name) })
   end)
 
   mod.log:info("g9-battle-engine: boss_fight_status installed (hardStatus, softStatus, antiDrain)")

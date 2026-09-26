@@ -58,6 +58,7 @@
 -- express "replace the type multiplier" rather than "add another factor
 -- on top of it" -- see that file's own header comment at the call site.
 return function(mod, data)
+  local Strings = require("src.core.Strings")
   local gen2Ok_Battle, Battle = pcall(require, "src.battle.gen2.Battle")
   Battle = gen2Ok_Battle and Battle or nil
   local setWeather = mod.exports.setWeather
@@ -106,7 +107,7 @@ return function(mod, data)
     battle.weatherPrimal = true
     battle.weatherPrimalSetter = mon
     battle:emit({ kind = "message",
-      text = battle:monName(mon) .. "'s ability intensified the weather!" })
+      text = Strings("%s's ability intensified the weather!", battle:monName(mon)) })
   end
 
   -- Round 338: Transform/Imposter re-run this for the ability it copied.
@@ -163,7 +164,7 @@ return function(mod, data)
           local def = self:moveDef(moveId)
           if def and def.type == blockedType and (def.power or 0) > 0 then
             self:emit({ kind = "message",
-              text = self:monName(attacker) .. "'s move failed against the weather!" })
+              text = Strings("%s's move failed against the weather!", self:monName(attacker)) })
             return
           end
         end

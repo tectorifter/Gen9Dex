@@ -6,6 +6,7 @@
 -- than a per-move id list, so this covers every status move in the
 -- entire roster automatically, existing and future.
 return function(mod, data)
+  local Strings = require("src.core.Strings")
   local nationalDex = mod.find and mod.find("national_dex")
   assert(nationalDex and nationalDex.exports and nationalDex.exports.moveById,
     "good_as_gold: national_dex must be loaded first")
@@ -25,7 +26,7 @@ return function(mod, data)
     local nativeUseMoveGoodAsGold = Battle.useMove
     function Battle:useMove(attacker, defender, moveId)
       if defender and defender ~= attacker and blocksMove(defender, moveId) then
-        self:emit({ kind = "message", text = "But, it failed!" })
+        self:emit({ kind = "message", text = Strings("But it failed!") })
         return
       end
       return nativeUseMoveGoodAsGold(self, attacker, defender, moveId)
@@ -33,13 +34,15 @@ return function(mod, data)
   end
 
   local BattleState = require("src.battle.BattleState")
-  local nativePerformMoveGoodAsGold = BattleState.performMove
+  local nativePerformMoveGoodAsGold = rawget(BattleState, "performMove")
+  if type(nativePerformMoveGoodAsGold) == "function" then
   function BattleState:performMove(user, target, moveInst, isCalled)
     if moveInst and target and target ~= user and blocksMove(target, moveInst.id) then
       self:sayNext(self:romText("_ButItFailedText", "But, it failed!"))
       return
     end
     return nativePerformMoveGoodAsGold(self, user, target, moveInst, isCalled)
+  end
   end
 
   mod.log:info("g9-battle-engine: good_as_gold installed (GOODASGOLD)")

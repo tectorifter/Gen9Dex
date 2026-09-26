@@ -302,10 +302,10 @@ return function(mod)
     function Gen2Battle:canAct(mon, moveId)
       if moveId and isFrozen(mon, true) and canDefrost(mon, moveId, true) then
         cureFrozen(mon)
-        say(self, ((mon and mon.name) or "?") .. " thawed out!")
+        say(self, Strings("%s thawed out!", ((mon and mon.name) or "?")))
       end
       if moveId and cantUseTwiceBlocks(self, mon, moveId, true) then
-        say(self, ((mon and mon.name) or "?") .. " can't use the same move twice in a row!")
+        say(self, Strings("%s can't use the same move twice in a row!", ((mon and mon.name) or "?")))
         return false
       end
       if type(nativeCanAct) ~= "function" then return true end
@@ -424,7 +424,7 @@ return function(mod)
       -- never call canAct) -- a plain fizzle, no PP spent, exactly the
       -- convention Disable/Torment's own fizzle uses.
       if attacker and cantUseTwiceBlocks(self, attacker, moveId, true) then
-        say(self, ((attacker and attacker.name) or "?") .. " can't use the same move twice in a row!")
+        say(self, Strings("%s can't use the same move twice in a row!", ((attacker and attacker.name) or "?")))
         return
       end
       if type(nativeUseMove) ~= "function" then return end
@@ -436,7 +436,8 @@ return function(mod)
   -- for both lines, and PP is spent (guarded by the called/struggle/
   -- enemy-unlimited exemptions the native decrement itself honors).
   local BattleState = require("src.battle.BattleState")
-  local nativePerformMove = BattleState.performMove
+  local nativePerformMove = rawget(BattleState, "performMove")
+  if type(nativePerformMove) == "function" then
   function BattleState:performMove(user, target, moveInst, isCalled)
     local moveId = moveInst and moveInst.id
     if moveId and powderImmune(self, user, target, moveId, false) then
@@ -452,8 +453,8 @@ return function(mod)
       end
       return
     end
-    if type(nativePerformMove) ~= "function" then return end
     return nativePerformMove(self, user, target, moveInst, isCalled)
+  end
   end
 
   ------------------------------------------------------------------

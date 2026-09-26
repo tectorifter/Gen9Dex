@@ -12,6 +12,7 @@
 -- requestAdjacency(battle, target, nil).allies, self checked
 -- unconditionally alongside it.
 return function(mod, data)
+  local Strings = require("src.core.Strings")
   local abilityIdOf = mod.exports.abilityIdOf
   local requestAdjacency = mod.exports.requestAdjacency
   assert(abilityIdOf and requestAdjacency,
@@ -38,7 +39,7 @@ return function(mod, data)
     function Battle:useMove(attacker, defender, moveId)
       if MENTAL_MOVES[moveId] and defender and defender ~= attacker
           and protectedByAromaVeil(self, defender) then
-        self:emit({ kind = "message", text = "But, it failed!" })
+        self:emit({ kind = "message", text = Strings("But it failed!") })
         return
       end
       return nativeUseMoveAromaVeil(self, attacker, defender, moveId)
@@ -46,7 +47,8 @@ return function(mod, data)
   end
 
   local BattleState = require("src.battle.BattleState")
-  local nativePerformMoveAromaVeil = BattleState.performMove
+  local nativePerformMoveAromaVeil = rawget(BattleState, "performMove")
+  if type(nativePerformMoveAromaVeil) == "function" then
   function BattleState:performMove(user, target, moveInst, isCalled)
     if moveInst and MENTAL_MOVES[moveInst.id] and target and target ~= user
         and protectedByAromaVeil(self, target) then
@@ -54,6 +56,7 @@ return function(mod, data)
       return
     end
     return nativePerformMoveAromaVeil(self, user, target, moveInst, isCalled)
+  end
   end
 
   mod.log:info("g9-battle-engine: aroma_veil installed (AROMAVEIL)")

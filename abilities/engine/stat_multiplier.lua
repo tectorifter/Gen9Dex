@@ -23,6 +23,7 @@
 -- those call sites, the same "one real primitive, not a parallel one"
 -- discipline this mod already applies everywhere else.
 return function(mod, data)
+  local Strings = require("src.core.Strings")
   local abilityIdOf = mod.exports.abilityIdOf
   local abilityBehaviorOf = mod.exports.abilityBehaviorOf
   local currentWeather = mod.exports.currentWeather
@@ -180,8 +181,7 @@ return function(mod, data)
     if not triggered then return end
     mon[flag] = true
     battle:emit({ kind = "message",
-      text = (id == "PROTOSYNTHESIS" and "Protosynthesis" or "Quark Drive")
-        .. " activated, boosting its highest stat!" })
+      text = Strings("%s activated, boosting its highest stat!", (id == "PROTOSYNTHESIS" and "Protosynthesis" or "Quark Drive")) })
   end
 
   local function protoQuarkBoost(battle, mon, key)

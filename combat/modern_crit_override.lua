@@ -132,7 +132,86 @@ return function(mod)
     return nextFn(ctx)
   end, 45)
 
+  ------------------------------------------------------------------
+  -- (4) Dragon Cheer: a crit-ratio volatile on the user's ADJACENT ALLIES
+  -- (never the user). Real Showdown moves.ts:4057+ -- `target:
+  -- "adjacentAlly"`, `volatileStatus: 'dragoncheer'`, whose condition
+  -- `onModifyCritRatio` returns `critRatio + (hasDragonType ? 2 : 1)` and
+  -- whose `onStart` returns false when the target already holds Focus
+  -- Energy. national_dex labels it `all-allies` (the allies, user
+  -- excluded -- the same scope the real move has). This is exactly the
+  -- ally-side status move combat/structural_exemptions.lua used to list as
+  -- unobservable ("no allied battler => empty target set"), so that
+  -- exemption is retired now that real ally slots exist. `hasDragonType`
+  -- is frozen at application time (the real volatile's own comment: the
+  -- boost doesn't change if the recipient later Terastallizes into
+  -- Dragon), and both fields are switch-scoped (see status_condition_
+  -- cleanup.lua).
+  ------------------------------------------------------------------
+  local function rawMon(who) return who and (who.mon or who) or nil end
+  local function showName(battle, who, gen2)
+    local nameOf = mod.exports.g9NameOf
+    if nameOf then
+      local ok, nm = pcall(nameOf, battle, who)
+      if ok and nm then return nm end
+    end
+    return displayNameFor(battle, who, gen2)
+  end
+
+  registerCritStageModifier("dragoncheer", function(ctx)
+    local user = ctx and ctx.user
+    if not user then return 0 end
+    local m = rawMon(user)
+    if m and m.dragonCheer then
+      return m.dragonCheerDragon and 2 or 1
+    end
+    return 0
+  end)
+
+  mod.content.move_effects:register("GALAR_DRAGONCHEER_EFFECT", {
+    kind = "primary",
+    run = function(a, b, c)
+      local n = normalize(a, b, c)
+      local battle = n.battle
+      local curTypesOf = mod.exports.curTypesOf
+      local requestAdjacency = mod.exports.requestAdjacency
+      local allies = {}
+      if requestAdjacency then
+        local ok, adj = pcall(requestAdjacency, battle, n.user, nil)
+        if ok and adj and adj.allies then
+          for _, ally in ipairs(adj.allies) do allies[#allies + 1] = ally end
+        end
+      end
+      local applied = 0
+      for _, ally in ipairs(allies) do
+        local m = rawMon(ally)
+        -- onStart: a recipient already holding Focus Energy is skipped
+        -- (the two crit volatiles do not stack), just as in Showdown.
+        if m and not m.focusEnergy then
+          local isDragon = false
+          if curTypesOf then
+            local ok2, types = pcall(curTypesOf, ally, n.gen2)
+            if ok2 then
+              for _, t in ipairs(types or {}) do
+                if t == "DRAGON" then isDragon = true break end
+              end
+            end
+          end
+          m.dragonCheer = true
+          m.dragonCheerDragon = isDragon
+          applied = applied + 1
+          battle:emit({ kind = "message",
+            text = Strings("%s's critical-hit ratio rose!", showName(battle, ally, n.gen2)) })
+        end
+      end
+      if applied == 0 then
+        battle:emit({ kind = "message", text = Strings("But it failed!") })
+      end
+    end,
+  })
+
   mod.log:info("g9-battle-engine: modern_crit_override installed "
     .. "(always-crit: WICKEDBLOW/SURGINGSTRIKES/FROSTBREATH/STORMTHROW/FLOWERTRICK; "
-    .. "LASERFOCUS guaranteed-crit volatile; Flower Trick sure-hit)")
+    .. "LASERFOCUS guaranteed-crit volatile; Flower Trick sure-hit; "
+    .. "DRAGONCHEER ally-side crit volatile)")
 end

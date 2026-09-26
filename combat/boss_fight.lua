@@ -74,6 +74,7 @@
 -- can validate and iterate the set instead of hardcoding it in several
 -- files.
 return function(mod)
+  local Strings = require("src.core.Strings")
   -- The canonical flag names, in one place -- display order, not a
   -- priority. Exported so a caller (and this mod's own registerTrainer
   -- option plumbing in trainers/custom_trainer_registry.lua) validates
@@ -129,7 +130,7 @@ return function(mod)
     if flags.trickRoom then
       battle.trickRoomActive = true
       battle.trickRoomTurns = math.huge
-      announce(battle, "The dimensions were twisted!")
+      announce(battle, Strings("The dimensions were twisted!"))
     end
     -- Magic Room / Wonder Room got their real field effects in the same
     -- round this comment changed (combat/trick_room.lua now owns
@@ -140,14 +141,14 @@ return function(mod)
     if flags.magicRoom then
       battle.magicRoomActive = true
       battle.magicRoomTurns = math.huge
-      announce(battle, "It created a bizarre area in which held items lose their effects!")
+      announce(battle, Strings("It created a bizarre area in which held items lose their effects!"))
     end
     if flags.wonderRoom then
       battle.wonderRoomActive = true
       battle.wonderRoomTurns = math.huge
       local applyWonderRoomToActives = mod.exports.applyWonderRoomToActives
       if applyWonderRoomToActives then applyWonderRoomToActives(battle, true) end
-      announce(battle, "It created a bizarre area in which Defense and Sp. Def are swapped!")
+      announce(battle, Strings("It created a bizarre area in which Defense and Sp. Def are swapped!"))
     end
   end
 

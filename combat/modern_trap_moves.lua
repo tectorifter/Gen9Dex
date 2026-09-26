@@ -63,6 +63,7 @@
 -- as dead here as Block/Octolock. They are wired in this same phase because
 -- they are literally the same mechanic, not left as a second-class gap.
 return function(mod)
+  local Strings = require("src.core.Strings")
   local normalize = mod.exports.normalize
   local displayNameFor = mod.exports.displayNameFor
   local sideOfWho = mod.exports.sideOfWho
@@ -101,7 +102,7 @@ return function(mod)
   end
 
   local function fail(battle)
-    emit(battle, "But it failed!")
+    emit(battle, Strings("But it failed!"))
   end
 
   ------------------------------------------------------------------
@@ -221,7 +222,7 @@ return function(mod)
         return fail(battle)
       end
       pin(battle, user, target, n.gen2)
-      emit(battle, displayNameFor(battle, target, n.gen2) .. " can't escape now!")
+      emit(battle, Strings("%s can't escape now!", displayNameFor(battle, target, n.gen2)))
     end,
   })
 
@@ -250,7 +251,7 @@ return function(mod)
       pin(battle, user, target, n.gen2)
       m.octolockActive = true
       m.octolockSource = rawMon(user)
-      emit(battle, displayNameFor(battle, target, n.gen2) .. " can't escape now!")
+      emit(battle, Strings("%s can't escape now!", displayNameFor(battle, target, n.gen2)))
     end,
   })
 
@@ -311,10 +312,10 @@ return function(mod)
     local gen2 = isGen2Battle(battle)
     local applyOk, err = pcall(function()
       if pin(battle, user, target, gen2) then
-        emit(battle, displayNameFor(battle, target, gen2) .. " can't escape now!")
+        emit(battle, Strings("%s can't escape now!", displayNameFor(battle, target, gen2)))
       end
       if spec.both and pin(battle, target, user, gen2) then
-        emit(battle, displayNameFor(battle, user, gen2) .. " can't escape now!")
+        emit(battle, Strings("%s can't escape now!", displayNameFor(battle, user, gen2)))
       end
     end)
     if not applyOk then

@@ -32,6 +32,7 @@
 -- below, matching real Showdown (which tracks the move's total damage
 -- across hits, then crosses half HP once).
 return function(mod, data)
+  local Strings = require("src.core.Strings")
   local abilityIdOf = mod.exports.abilityIdOf
   local displayNameFor = mod.exports.displayNameFor
   local isGen2Battle = mod.exports.isGen2Battle
@@ -89,8 +90,8 @@ return function(mod, data)
   end
 
   local function speedMessage(battle, mon, verb)
-    return displayNameFor(battle, mon, isGen2Battle(battle))
-      .. "'s Speed " .. verb .. "!"
+    return Strings("%s's Speed " .. verb .. "!",
+      displayNameFor(battle, mon, isGen2Battle(battle)))
   end
 
   ------------------------------------------------------------------
@@ -157,7 +158,7 @@ return function(mod, data)
     end
     if dropped then
       battle:emit({ kind = "message",
-        text = displayNameFor(battle, target, gen2) .. "'s Cotton Down lowered every active Pokémon's Speed!" })
+        text = Strings("%s's Cotton Down lowered every active Pokémon's Speed!", displayNameFor(battle, target, gen2)) })
     end
   end
   local function gooeyLike(battle, target, user, moveId, gen2)
@@ -177,7 +178,7 @@ return function(mod, data)
     if not canSetWeather(battle, false, target) then return end
     local turns = resolveFieldDuration(target, FIELD_BASE_TURNS, FIELD_EXTENDED_TURNS, "SMOOTHROCK")
     setWeather(battle, true, "SAND", turns, target)
-    battle:emit({ kind = "message", text = battle:monName(target) .. "'s ability changed the weather!" })
+    battle:emit({ kind = "message", text = Strings("%s's ability changed the weather!", battle:monName(target)) })
   end
 
   ------------------------------------------------------------------

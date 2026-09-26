@@ -97,6 +97,7 @@
 -- from mod code as it stands -- see MULTI_BATTLE_HOOKS.md for the full
 -- explanation and what a future multi-battler mod would need to bring.
 return function(mod)
+  local Strings = require("src.core.Strings")
   -- Gen 1 (round 100): there is no Gen-2 Battle/Damage class, and the
   -- sandbox's cross-generation denial refuses both names
   -- (src/mods/Loader.lua crossGenerationDenial), which used to abort this
@@ -830,13 +831,13 @@ return function(mod)
       battle.moveEvent = battle:emit({ kind = "move",
         side = battle.sideOf and battle:sideOf(caster),
         move = moveId,
-        text = (name or "?") .. "\nused " .. ((def and def.name) or moveId) .. "!" })
+        text = Strings("%s\nused %s!", (name or "?"), ((def and def.name) or moveId)) })
       if battle.markMissed then battle:markMissed() end
       -- failText (round 100): a rule-specific refusal line from
       -- combat/move_usability.lua ("X is locked into Y!", "X can't use Y
       -- while holding the Assault Vest!"). Native's own generic tail when
       -- the caller has no specific text, exactly as before.
-      battle:emit({ kind = "message", text = failText or "But it failed!" })
+      battle:emit({ kind = "message", text = failText or Strings("But it failed!") })
     end
   end
 

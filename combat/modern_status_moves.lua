@@ -117,8 +117,8 @@ return function(mod)
   end
 
   local function failed(battle)
-    say(battle, "But it failed!")
-    if not isGen2Battle(battle) then return { "But it failed!" } end
+    say(battle, Strings("But it failed!"))
+    if not isGen2Battle(battle) then return { Strings("But it failed!") } end
     return {}
   end
 

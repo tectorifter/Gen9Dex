@@ -1,6 +1,7 @@
 -- Dispatch engine for abilities/data/switch_priority_misc.lua -- see
 -- that file's own header for the full real-mechanic grounding.
 return function(mod, data)
+  local Strings = require("src.core.Strings")
   local abilityIdOf = mod.exports.abilityIdOf
   local displayNameFor = mod.exports.displayNameFor
   local requestAdjacency = mod.exports.requestAdjacency
@@ -60,7 +61,7 @@ return function(mod, data)
         end
         if reset then
           battle:emit({ kind = "message",
-            text = displayNameFor(battle, ally, gen2) .. "'s stat changes were removed!" })
+            text = Strings("%s's stat changes were removed!", displayNameFor(battle, ally, gen2)) })
         end
       end
     end
@@ -83,8 +84,7 @@ return function(mod, data)
     local toStages = stagesFor(battle, mon)
     for _, stat in ipairs(FOUR_STATS) do toStages[stat] = fromStages[stat] or 0 end
     battle:emit({ kind = "message",
-      text = displayNameFor(battle, mon, gen2) .. " copied " .. displayNameFor(battle, ally, gen2)
-        .. "'s stat changes!" })
+      text = Strings("%s copied %s's stat changes!", displayNameFor(battle, mon, gen2), displayNameFor(battle, ally, gen2)) })
   end
 
   local function applySwitchInMisc(battle, mon)

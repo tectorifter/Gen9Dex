@@ -16,6 +16,7 @@
 -- such note, and real Color Change legitimately retriggers on every hit
 -- that lands.
 return function(mod, data)
+  local Strings = require("src.core.Strings")
   local abilityIdOf = mod.exports.abilityIdOf
   local setMonTypes = mod.exports.setMonTypes
   local canChangeType = mod.exports.canChangeType
@@ -39,7 +40,7 @@ return function(mod, data)
     if not canChangeType(battle, target, { viaOpponent = false }) then return end
     setMonTypes(battle, target, { moveType })
     battle:emit({ kind = "message",
-      text = battle:monName(target) .. " transformed into the " .. moveType .. " type!" })
+      text = Strings("%s transformed into the %s type!", battle:monName(target), moveType) })
   end)
 
   mod.log:info("g9-battle-engine: ondamage_type_change ability engine installed (COLORCHANGE)")

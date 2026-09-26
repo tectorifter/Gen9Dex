@@ -122,9 +122,16 @@ return function(mod)
   Battle = gen2Ok_Battle and Battle or nil
 
   if Battle then
+    -- Gen 2's own messages go through the engine's Strings() like Gen 1's
+    -- romText() above: the English source is the catalog key the translation
+    -- mods override (mod.content.strings), so real combat narration
+    -- translates instead of being built by concatenation. Every template
+    -- below is the engine's own key -- the same wording its native paths
+    -- print -- so a translation the mod already carries applies verbatim.
+    local Strings = require("src.core.Strings")
     Battle.STATUSES.paralyze.beforeMove = function(battle, mon, name)
       if percentRoll(true, battle, 25) then
-        battle:emit({ kind = "message", text = name .. "'s fully paralyzed!" })
+        battle:emit({ kind = "message", text = Strings("%s's fully paralyzed!", name) })
         return false
       end
       return true
@@ -143,20 +150,20 @@ return function(mod)
       if mon.statusTurns <= 0 then
         mon.status = nil
         mon.statusTurns = nil
-        battle:emit({ kind = "message", text = name .. " woke up!" })
+        battle:emit({ kind = "message", text = Strings("%s woke up!", name) })
         return true
       end
-      battle:emit({ kind = "message", text = name .. " is fast asleep!" })
+      battle:emit({ kind = "message", text = Strings("%s is fast asleep!", name) })
       return false
     end
 
     Battle.STATUSES.freeze.beforeMove = function(battle, mon, name)
       if percentRoll(true, battle, 20) then
         mon.status = nil
-        battle:emit({ kind = "message", text = name .. " thawed out!" })
+        battle:emit({ kind = "message", text = Strings("%s thawed out!", name) })
         return true
       end
-      battle:emit({ kind = "message", text = name .. " is frozen solid!" })
+      battle:emit({ kind = "message", text = Strings("%s is frozen solid!", name) })
       return false
     end
 
@@ -176,7 +183,6 @@ return function(mod)
     -- freeze. `onInflict`'s `mon.toxicCounter = 1` stays native -- it is the
     -- stage the residual reads, and the reset-on-switch half of the real
     -- mechanic lives in combat/status_condition_cleanup.lua.
-    local Strings = require("src.core.Strings")
     Battle.STATUSES.toxic.residual = function(_, mon, maxHp)
       local stage = mon.toxicCounter or 1
       if stage < 15 then mon.toxicCounter = stage + 1 end

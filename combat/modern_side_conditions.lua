@@ -198,7 +198,7 @@ return function(mod)
     local ended = battle.terrain
     battle.terrain = nil
     battle.terrainTurns = nil
-    emit(battle, TERRAIN_END_TEXT[ended] or "The terrain disappeared.")
+    emit(battle, Strings(TERRAIN_END_TEXT[ended] or "The terrain disappeared."))
     mod.events:emit("g9.terrain_changed", { battle = battle, key = nil })
     return true
   end

@@ -16,6 +16,7 @@
 -- still be blocked even if the holder also has Contrary) before
 -- Contrary/Simple's own transform is applied to what actually lands.
 return function(mod, data)
+  local Strings = require("src.core.Strings")
   local abilityIdOf = mod.exports.abilityIdOf
   assert(abilityIdOf, "stage_change_transform: ability_dispatch.lua must load first")
 
@@ -24,7 +25,7 @@ return function(mod, data)
   if Battle then
   function Battle:changeStageAgainstMist(attacker, target, stat, stages)
     if target ~= attacker and (stages or 0) < 0 and self:volatile(target).mist then
-      self:emit({ kind = "message", text = self:monName(target) .. "'s protected by MIST." })
+      self:emit({ kind = "message", text = Strings("%s's protected by MIST.", self:monName(target)) })
       return false
     end
     -- Phase 7 (prevent bucket): Clear Body/Full Metal Body/White Smoke/

@@ -28,6 +28,7 @@
 -- Gen 2's own damage path entirely, SUBEFFECTS.md's own documented
 -- gotcha).
 return function(mod)
+  local Strings = require("src.core.Strings")
   local gen2Ok_Battle, Battle = pcall(require, "src.battle.gen2.Battle")
   Battle = gen2Ok_Battle and Battle or nil
   local curTypesOf = mod.exports.curTypesOf
@@ -50,15 +51,15 @@ return function(mod)
     accuracyChecked = true,
     run = function(battle, attacker, defender, def, moveId, sureHit)
       if not canChangeType(battle, defender, { viaOpponent = true }) then
-        battle:emit({ kind = "message", text = "But it failed!" })
+        battle:emit({ kind = "message", text = Strings("But it failed!") })
         return
       end
       if isMonotype(curTypesOf(defender, true), "WATER") then
-        battle:emit({ kind = "message", text = "But it failed!" })
+        battle:emit({ kind = "message", text = Strings("But it failed!") })
         return
       end
       setMonTypes(battle, defender, { "WATER" })
-      battle:emit({ kind = "message", text = battle:monName(defender) .. " transformed into a Water type!" })
+      battle:emit({ kind = "message", text = Strings("%s transformed into a Water type!", battle:monName(defender)) })
     end,
   })
   mod.content.moves:patch("SOAK", { effect = "G9_SOAK_EFFECT" })
@@ -72,15 +73,15 @@ return function(mod)
     accuracyChecked = true,
     run = function(battle, attacker, defender, def, moveId, sureHit)
       if not canChangeType(battle, defender, { viaOpponent = true }) then
-        battle:emit({ kind = "message", text = "But it failed!" })
+        battle:emit({ kind = "message", text = Strings("But it failed!") })
         return
       end
       if isMonotype(curTypesOf(defender, true), "PSYCHIC") then
-        battle:emit({ kind = "message", text = "But it failed!" })
+        battle:emit({ kind = "message", text = Strings("But it failed!") })
         return
       end
       setMonTypes(battle, defender, { "PSYCHIC" })
-      battle:emit({ kind = "message", text = battle:monName(defender) .. " transformed into a Psychic type!" })
+      battle:emit({ kind = "message", text = Strings("%s transformed into a Psychic type!", battle:monName(defender)) })
     end,
   })
   mod.content.moves:patch("MAGICPOWDER", { effect = "G9_MAGICPOWDER_EFFECT" })
@@ -96,18 +97,18 @@ return function(mod)
     kind = "primary",
     run = function(battle, attacker, defender, def, moveId, sureHit)
       if not canChangeType(battle, attacker, { viaOpponent = false }) then
-        battle:emit({ kind = "message", text = "But it failed!" })
+        battle:emit({ kind = "message", text = Strings("But it failed!") })
         return
       end
       local firstSlot = attacker.moves and attacker.moves[1]
       local firstDef = firstSlot and battle.data.moves[firstSlot.id]
       local moveType = firstDef and firstDef.type
       if not moveType or isMonotype(curTypesOf(attacker, true), moveType) then
-        battle:emit({ kind = "message", text = "But it failed!" })
+        battle:emit({ kind = "message", text = Strings("But it failed!") })
         return
       end
       setMonTypes(battle, attacker, { moveType })
-      battle:emit({ kind = "message", text = battle:monName(attacker) .. " transformed into the " .. moveType .. " type!" })
+      battle:emit({ kind = "message", text = Strings("%s transformed into the %s type!", battle:monName(attacker), moveType) })
     end,
   })
   mod.content.moves:patch("CONVERSION", { effect = "G9_CONVERSION_EFFECT" })
@@ -127,17 +128,17 @@ return function(mod)
       -- defender (only ever a copy SOURCE here, not itself changed) -- a
       -- Terastallized/Dynamaxed target can still be copied FROM.
       if not canChangeType(battle, attacker, { viaOpponent = false }) then
-        battle:emit({ kind = "message", text = "But it failed!" })
+        battle:emit({ kind = "message", text = Strings("But it failed!") })
         return
       end
       local targetTypes = curTypesOf(defender, true)
       if #targetTypes == 0 then
-        battle:emit({ kind = "message", text = "But it failed!" })
+        battle:emit({ kind = "message", text = Strings("But it failed!") })
         return
       end
       setMonTypes(battle, attacker, targetTypes)
       battle:emit({ kind = "message",
-        text = battle:monName(attacker) .. "'s type changed to match " .. battle:monName(defender) .. "'s!" })
+        text = Strings("%s's type changed to match %s's!", battle:monName(attacker), battle:monName(defender)) })
     end,
   })
   mod.content.moves:patch("REFLECTTYPE", { effect = "G9_REFLECTTYPE_EFFECT" })
@@ -159,16 +160,16 @@ return function(mod)
     kind = "primary",
     run = function(battle, attacker, defender, def, moveId, sureHit)
       if not canChangeType(battle, attacker, { viaOpponent = false }) then
-        battle:emit({ kind = "message", text = "But it failed!" })
+        battle:emit({ kind = "message", text = Strings("But it failed!") })
         return
       end
       local newType = (battle.terrain and CAMOUFLAGE_TERRAIN_TYPE[battle.terrain]) or "NORMAL"
       if isMonotype(curTypesOf(attacker, true), newType) then
-        battle:emit({ kind = "message", text = "But it failed!" })
+        battle:emit({ kind = "message", text = Strings("But it failed!") })
         return
       end
       setMonTypes(battle, attacker, { newType })
-      battle:emit({ kind = "message", text = battle:monName(attacker) .. " transformed into the " .. newType .. " type!" })
+      battle:emit({ kind = "message", text = Strings("%s transformed into the %s type!", battle:monName(attacker), newType) })
     end,
   })
   mod.content.moves:patch("CAMOUFLAGE", { effect = "G9_CAMOUFLAGE_EFFECT" })
@@ -199,7 +200,7 @@ return function(mod)
           if t == requiredType then has = true break end
         end
         if not has then
-          self:emit({ kind = "message", text = "But it failed!" })
+          self:emit({ kind = "message", text = Strings("But it failed!") })
           return
         end
       end
@@ -224,8 +225,7 @@ return function(mod)
       if t ~= requiredType then remaining[#remaining + 1] = t end
     end
     setMonTypes(battle, user, remaining)
-    battle:emit({ kind = "message", text = battle:monName(user) .. "'s " .. requiredType:sub(1, 1)
-      .. requiredType:sub(2):lower() .. " type burned up!" })
+    battle:emit({ kind = "message", text = Strings("%s's %s type burned up!", battle:monName(user), requiredType:sub(1, 1) .. requiredType:sub(2):lower()) })
   end)
 
   ------------------------------------------------------------------

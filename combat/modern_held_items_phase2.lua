@@ -100,19 +100,31 @@ return function(mod)
     { id = "GRISEOUS_ORB", name = "Griseous Orb" },
   }
   do
-    local registered = 0
+    local registered, present = 0, 0
     for _, def in ipairs(NEW_ITEMS) do
-      local ok, err = pcall(function()
-        mod.content.items:register(def.id, {
-          id = def.id, name = def.name, price = 0, tossable = true,
-        })
-      end)
-      if ok then registered = registered + 1
-      else mod.log:warn("g9-battle-engine: modern_held_items_phase2: "
-        .. "item registration failed for %s (%s)", def.id, tostring(err)) end
+      -- Skip an id another mod already registered (battle_forms owns
+      -- GRISEOUS_ORB for Giratina's held-file form and loads first at
+      -- priority 80). The engine's six-field stub is meant for ids nothing
+      -- else carries, so the existing richer record wins and the duplicate
+      -- no longer logs an "items already registered" failure (round 349).
+      local existing = type(mod.content.items.get) == "function"
+        and mod.content.items:get(def.id) or nil
+      if existing ~= nil then
+        present = present + 1
+      else
+        local ok, err = pcall(function()
+          mod.content.items:register(def.id, {
+            id = def.id, name = def.name, price = 0, tossable = true,
+          })
+        end)
+        if ok then registered = registered + 1
+        else mod.log:warn("g9-battle-engine: modern_held_items_phase2: "
+          .. "item registration failed for %s (%s)", def.id, tostring(err)) end
+      end
     end
-    mod.log:info("g9-battle-engine: modern_held_items_phase2: %d/%d new items registered",
-      registered, #NEW_ITEMS)
+    mod.log:info("g9-battle-engine: modern_held_items_phase2: %d/%d new items "
+      .. "registered (%d already present from another mod)",
+      registered, #NEW_ITEMS, present)
   end
 
   ------------------------------------------------------------------

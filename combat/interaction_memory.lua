@@ -77,12 +77,14 @@ return function(mod)
   end
 
   local BattleState = require("src.battle.BattleState")
-  local nativePerformMoveRecorder = BattleState.performMove
+  local nativePerformMoveRecorder = rawget(BattleState, "performMove")
+  if type(nativePerformMoveRecorder) == "function" then
   function BattleState:performMove(user, target, moveInst, isCalled)
     if user and target and user ~= target and moveInst then
       mod.exports.recordInteraction(self, user, target, "move", moveInst.id)
     end
     return nativePerformMoveRecorder(self, user, target, moveInst, isCalled)
+  end
   end
 
   mod.log:info("g9-battle-engine: interaction_memory installed "

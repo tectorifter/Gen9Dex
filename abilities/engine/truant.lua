@@ -1,6 +1,7 @@
 -- Dispatch engine for abilities/data/truant.lua -- see that file's own
 -- header for the real mechanic and the one honest simplification.
 return function(mod, data)
+  local Strings = require("src.core.Strings")
   local abilityIdOf = mod.exports.abilityIdOf
   local displayNameFor = mod.exports.displayNameFor
   local isGen2Battle = mod.exports.isGen2Battle
@@ -34,7 +35,7 @@ return function(mod, data)
       if mon and hpOf(mon) > 0 and data.TRUANT and abilityIdOf(mon) == "TRUANT" then
         if mon.truantLoafing then
           if gen2 then battle:volatile(mon).recharge = true else mon.mustRecharge = true end
-          battle:emit({ kind = "message", text = displayNameFor(battle, mon, gen2) .. " is loafing around!" })
+          battle:emit({ kind = "message", text = Strings("%s is loafing around.", displayNameFor(battle, mon, gen2)) })
           mon.truantLoafing = false
         else
           mon.truantLoafing = true

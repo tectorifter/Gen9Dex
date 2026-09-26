@@ -94,6 +94,77 @@ return function(mod)
     return true
   end
 
+  ------------------------------------------------------------------
+  -- Ally-side ("user-and-allies") recovery helpers -- Life Dew and
+  -- Lunar Blessing below.
+  --
+  -- Both moves are national_dex target "user-and-allies" (real Showdown
+  -- `target: "allies"`: the user AND every adjacent ally), so their real
+  -- effect is a spread across the user's OWN side. This engine delivers
+  -- such a move ONCE -- resolveMoveTargets expands only the two
+  -- OFFENSIVE spread archetypes -- so the effect handler itself walks the
+  -- real side, the exact same shape combat/modern_party_support.lua's
+  -- Aromatherapy / Heal Bell / Jungle Healing already use. It is the
+  -- adjacency seam that answers "how big is the side": the native
+  -- two-battler fallback reports no allies (singles), a doubles/triples
+  -- layout reports the literally-adjacent slots, and the 4v4/boss/horde
+  -- layouts report the whole team -- so this is correct in every format
+  -- with no per-layout wiring here.
+  ------------------------------------------------------------------
+  local function rawMon(who) return who and (who.mon or who) or nil end
+
+  -- The user plus every adjacent ally, in order. requestAdjacency's own
+  -- contract already excludes the caster from `allies`, so nothing is
+  -- double-counted.
+  local function alliesAndSelf(battle, user)
+    local out = { user }
+    local requestAdjacency = mod.exports.requestAdjacency
+    if requestAdjacency then
+      local ok, adj = pcall(requestAdjacency, battle, user, nil)
+      if ok and adj and adj.allies then
+        for _, ally in ipairs(adj.allies) do out[#out + 1] = ally end
+      end
+    end
+    return out
+  end
+
+  -- Heal num/den of max HP on a living, not-already-full recipient and
+  -- return the amount actually restored (0 for any no-op). Written
+  -- raw-mon-tolerant because the caster arrives as a battler (Gen 1
+  -- wrapper / Gen 2 mon) while every adjacency-reported ally is a raw mon,
+  -- and routed through the one real heal gate (Heal Block / boss
+  -- "healblock") exactly like healFraction above.
+  local function healFractionAmount(battle, who, numerator, denominator)
+    local mon = rawMon(who)
+    if not mon then return 0 end
+    local maxHp = mon.maxHp or (mon.stats and mon.stats.hp)
+    if not maxHp or maxHp <= 0 then return 0 end
+    if (mon.hp or 0) <= 0 or (mon.hp or 0) >= maxHp then return 0 end
+    local amount = math.max(1, math.floor(maxHp * numerator / denominator))
+    local tryHeal = mod.exports.g9TryHeal
+    if tryHeal then return tryHeal(battle, who, amount) end
+    mon.hp = math.min(maxHp, mon.hp + amount)
+    return amount
+  end
+
+  local function emitMsg(battle, text)
+    if battle and battle.emit then battle:emit({ kind = "message", text = text }) end
+  end
+
+  -- A recipient's display name WITHOUT a side prefix -- displayNameFor
+  -- prefixes "Enemy" for a raw mon it can't place, which an ally is not.
+  -- Reuses modern_party_support.lua's own tolerant namer, the one every
+  -- existing side-wide effect already messages through, and falls back to
+  -- displayNameFor only if that module is absent.
+  local function sideName(battle, who)
+    local nameOf = mod.exports.g9NameOf
+    if nameOf then
+      local ok, nm = pcall(nameOf, battle, who)
+      if ok and nm then return nm end
+    end
+    return displayNameFor(battle, who, true)
+  end
+
   -- Heal Pulse: heals the TARGET (not the user) by half its max HP.
   -- Target-directed like Decorate in stages.lua, so accuracyChecked=true
   -- for the same reason (a genuine miss roll against the target, not a
@@ -113,20 +184,28 @@ return function(mod)
     end,
   })
 
-  -- Life Dew: heals the USER (and allies, but this engine has no ally
-  -- slot to also heal) by half its max HP. Gen 9 Home update raised this
-  -- from its original Gen 8 1/4 to 1/2 -- this file follows the plan's own
-  -- cross-generation rule (default to the most current Showdown behavior
-  -- unless a later generation explicitly removed something), so 1/2, not
-  -- 1/4.
+  -- Life Dew: heals the USER and every adjacent ally by 1/4 of max HP.
+  -- Showdown moves.ts:10289 carries `heal: [1, 4]` with `target: "allies"`,
+  -- and national_dex's own record agrees (`healing = 25`) -- NOT the 1/2 an
+  -- earlier note here claimed (no generation ever raised it; that note was
+  -- wrong). One line is emitted per recipient (a handler's return value is
+  -- discarded on Gen 2, so messages must be emitted), and the move fails
+  -- only when nobody on the side needed healing.
   mod.content.move_effects:register("GALAR_LIFEDEW_EFFECT", {
     kind = "primary",
     run = function(a, b, c)
       local n = normalize(a, b, c)
-      if not healFraction(n.battle, n.user, 1, 2) then
-        return { romText(n.battle.data, "_ButItFailedText", "But, it failed!") }
+      local battle = n.battle
+      local healedAny = false
+      for _, ally in ipairs(alliesAndSelf(battle, n.user)) do
+        if healFractionAmount(battle, ally, 1, 4) > 0 then
+          healedAny = true
+          emitMsg(battle, Strings("%s's\nHP was restored!", sideName(battle, ally)))
+        end
       end
-      return { Strings("%s's\nHP was restored!", displayNameFor(n.battle, n.user, n.gen2)) }
+      if not healedAny then
+        emitMsg(battle, romText(battle.data, "_ButItFailedText", "But, it failed!"))
+      end
     end,
   })
 
@@ -223,19 +302,25 @@ return function(mod)
     end,
   })
 
-  -- Lunar Blessing: heals the USER (and allies, no ally slot to reach
-  -- in this engine today) 25% max HP and cures its own status --
-  -- unconditional (never "but it failed," matching real Blessing-family
-  -- moves), so the two actions run independently rather than one
-  -- gating the other.
+  -- Lunar Blessing: heals the USER and every adjacent ally by 1/4 of max
+  -- HP and cures each of its status. Showdown moves.ts:10550 -- `target:
+  -- "allies"`, `onHit` heals 0.25 then `cureStatus()` -- i.e. the user and
+  -- its adjacent allies, one recipient at a time. Unconditional (never
+  -- "but it failed," matching the real Blessing family), so the heal and
+  -- the cure run independently rather than one gating the other.
   mod.content.move_effects:register("GALAR_LUNARBLESSING_EFFECT", {
     kind = "primary",
     run = function(a, b, c)
       local n = normalize(a, b, c)
+      local battle = n.battle
       local cureStatusOf = mod.exports.cureStatusOf
-      healFraction(n.battle, n.user, 1, 4)
-      if cureStatusOf then cureStatusOf(n.user) end
-      return { Strings("%s\nwas blessed\nby the full moon!", displayNameFor(n.battle, n.user, n.gen2)) }
+      for _, ally in ipairs(alliesAndSelf(battle, n.user)) do
+        if healFractionAmount(battle, ally, 1, 4) > 0 then
+          emitMsg(battle, Strings("%s's\nHP was restored!", sideName(battle, ally)))
+        end
+        if cureStatusOf then pcall(cureStatusOf, ally) end
+      end
+      emitMsg(battle, Strings("%s\nwas blessed\nby the full moon!", sideName(battle, n.user)))
     end,
   })
 
@@ -527,7 +612,8 @@ return function(mod)
   do local ok, E = pcall(require, "src.battle.gen2.Effects"); if ok and E then E.CHARGE.GALAR_ELECTROSHOT_EFFECT = { text = "%s absorbed electricity!" } end end
 
   local BattleState = require("src.battle.BattleState")
-  local nativePerformMove = BattleState.performMove
+  local nativePerformMove = rawget(BattleState, "performMove")
+  if type(nativePerformMove) == "function" then
   function BattleState:performMove(user, target, moveInst, isCalled)
     if moveInst and moveInst.id == "ELECTROSHOT" and not isGen2Battle(self) and not user.charging then
       local currentWeather = mod.exports.currentWeather
@@ -540,6 +626,7 @@ return function(mod)
       end
     end
     return nativePerformMove(self, user, target, moveInst, isCalled)
+  end
   end
 
   mod.log:info("galar_gmax_dex: modern_movepool_damage loaded")

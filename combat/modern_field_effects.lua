@@ -77,6 +77,7 @@
 --     existing berry classification (combat/modern_items.lua's KNOWN_BERRIES)
 --     rather than a schema flag, since the item schema has no isBerry field.
 return function(mod)
+  local Strings = require("src.core.Strings")
   local normalize = mod.exports.normalize
   local displayNameFor = mod.exports.displayNameFor
   local sideOfWho = mod.exports.sideOfWho
@@ -138,7 +139,7 @@ return function(mod)
   end
 
   local function fail(battle)
-    emit(battle, "But it failed!")
+    emit(battle, Strings("But it failed!"))
   end
 
   ------------------------------------------------------------------
@@ -175,7 +176,7 @@ return function(mod)
       -- extend Gravity, so this always resolves to the base 5 today.
       battle.gravityTurns = resolveFieldDuration(user, FIELD_BASE_TURNS, 7, nil)
       applyGravityToActives(battle, true)
-      emit(battle, "Gravity intensified!")
+      emit(battle, Strings("Gravity intensified!"))
     end,
   })
 
@@ -204,7 +205,7 @@ return function(mod)
       if not battle then return end
       if (battle.ionDelugeTurns or 0) > 0 then return fail(battle) end
       battle.ionDelugeTurns = 1
-      emit(battle, "A deluge of ions showers the battlefield!")
+      emit(battle, Strings("A deluge of ions showers the battlefield!"))
     end,
   })
 
@@ -217,8 +218,7 @@ return function(mod)
       local m = rawMon(target)
       m.volatile = m.volatile or {}
       m.volatile.electrify = true
-      emit(battle, displayNameFor(battle, target, n.gen2)
-        .. "'s moves have been electrified!")
+      emit(battle, Strings("%s's moves have been electrified!", displayNameFor(battle, target, n.gen2)))
     end,
   })
 
@@ -250,8 +250,7 @@ return function(mod)
       local m = rawMon(target)
       m.volatile = m.volatile or {}
       m.volatile.powder = true
-      emit(battle, displayNameFor(battle, target, n.gen2)
-        .. " was covered in powder!")
+      emit(battle, Strings("%s was covered in powder!", displayNameFor(battle, target, n.gen2)))
     end,
   })
 
@@ -285,7 +284,7 @@ return function(mod)
       if not battle then return end
       if (battle.mudSportTurns or 0) > 0 then return fail(battle) end
       battle.mudSportTurns = resolveFieldDuration(user, FIELD_BASE_TURNS, 5, nil)
-      emit(battle, "Electricity's power was weakened!")
+      emit(battle, Strings("Electricity's power was weakened!"))
     end,
   })
 
@@ -297,7 +296,7 @@ return function(mod)
       if not battle then return end
       if (battle.waterSportTurns or 0) > 0 then return fail(battle) end
       battle.waterSportTurns = resolveFieldDuration(user, FIELD_BASE_TURNS, 5, nil)
-      emit(battle, "Fire's power was weakened!")
+      emit(battle, Strings("Fire's power was weakened!"))
     end,
   })
 
@@ -350,8 +349,7 @@ return function(mod)
       if (sc.tailwind or 0) > 0 then return fail(battle) end
       -- Base 4 (Persistent -> 6); no item extends Tailwind.
       sc.tailwind = resolveFieldDuration(user, 4, 6, nil)
-      emit(battle, "The Tailwind blew from behind "
-        .. displayNameFor(battle, user, n.gen2) .. "'s team!")
+      emit(battle, Strings("The Tailwind blew from behind %s's team!", displayNameFor(battle, user, n.gen2)))
     end,
   })
 
@@ -411,9 +409,7 @@ return function(mod)
       -- Light Clay extends 5 -> 8, exactly Showdown's durationCallback.
       sc.auroraVeil = resolveFieldDuration(user, FIELD_BASE_TURNS,
         FIELD_EXTENDED_TURNS, "LIGHT_CLAY")
-      emit(battle, "Aurora Veil made "
-        .. displayNameFor(battle, user, n.gen2)
-        .. "'s team more resilient to attacks!")
+      emit(battle, Strings("Aurora Veil made %s's team more resilient to attacks!", displayNameFor(battle, user, n.gen2)))
     end,
   })
 
@@ -430,9 +426,7 @@ return function(mod)
       local sc = screensOf(battle, side)
       if (sc.luckyChant or 0) > 0 then return fail(battle) end
       sc.luckyChant = resolveFieldDuration(user, FIELD_BASE_TURNS, 5, nil)
-      emit(battle, "The Lucky Chant shielded "
-        .. displayNameFor(battle, user, n.gen2)
-        .. "'s team from critical hits!")
+      emit(battle, Strings("The Lucky Chant shielded %s's team from critical hits!", displayNameFor(battle, user, n.gen2)))
     end,
   })
 
@@ -460,7 +454,7 @@ return function(mod)
       if not battle then return end
       if (battle.fairyLockTurns or 0) > 0 then return fail(battle) end
       battle.fairyLockTurns = 2
-      emit(battle, "No one will be able to flee the battlefield!")
+      emit(battle, Strings("No one will be able to flee the battlefield!"))
     end,
   })
 
@@ -495,7 +489,7 @@ return function(mod)
             m.ggdConsumedBerryThisBattle = true
             ate = true
             local nm = displayNameFor(battle, who, n.gen2)
-            emit(battle, nm .. " ate its " .. (def.name or item) .. "!")
+            emit(battle, Strings("%s ate its %s!", nm, (def.name or item)))
             if applyEatenBerryEffect then
               pcall(applyEatenBerryEffect, battle, m, def, nm)
             end
@@ -503,7 +497,7 @@ return function(mod)
         end
       end
       if not ate then return fail(battle) end
-      emit(battle, "It's teatime!")
+      emit(battle, Strings("It's teatime!"))
     end,
   })
 
@@ -524,8 +518,7 @@ return function(mod)
         kind = "move",
         side = (battle.sideOf and battle:sideOf(attacker)) or "player",
         move = moveId,
-        text = (battle.monName and battle:monName(attacker) or "?")
-          .. " used " .. ((def and def.name) or moveId) .. "!",
+        text = Strings("%s used %s!", (battle.monName and battle:monName(attacker) or "?"), ((def and def.name) or moveId)),
       })
     end
   end
@@ -537,7 +530,7 @@ return function(mod)
     local maxHp = m.maxHp or (m.stats and m.stats.hp) or 1
     local dmg = math.max(1, math.floor(maxHp / 4))
     m.hp = math.max(0, (m.hp or 0) - dmg)
-    emit(battle, "The powder exploded!")
+    emit(battle, Strings("The powder exploded!"))
     if battle.emit then
       battle:emit({ kind = "damage",
         side = (battle.sideOf and battle:sideOf(attacker)) or "player",
@@ -617,26 +610,26 @@ return function(mod)
     if not battle then return end
     tickField(battle, "gravityTurns", function()
       applyGravityToActives(battle, false)
-      emit(battle, "Gravity returned to normal!")
+      emit(battle, Strings("Gravity returned to normal!"))
     end)
     tickField(battle, "mudSportTurns", function()
-      emit(battle, "The effects of Mud Sport have faded.")
+      emit(battle, Strings("The effects of Mud Sport have faded."))
     end)
     tickField(battle, "waterSportTurns", function()
-      emit(battle, "The effects of Water Sport have faded.")
+      emit(battle, Strings("The effects of Water Sport have faded."))
     end)
     tickField(battle, "ionDelugeTurns")
     tickField(battle, "fairyLockTurns", function()
-      emit(battle, "The effects of Fairy Lock have faded.")
+      emit(battle, Strings("The effects of Fairy Lock have faded."))
     end)
     tickSide(battle, "tailwind", function()
-      emit(battle, "The Tailwind petered out!")
+      emit(battle, Strings("The Tailwind petered out!"))
     end)
     tickSide(battle, "auroraVeil", function()
-      emit(battle, "The Aurora Veil faded!")
+      emit(battle, Strings("The Aurora Veil faded!"))
     end)
     tickSide(battle, "luckyChant", function()
-      emit(battle, "The Lucky Chant wore off!")
+      emit(battle, Strings("The Lucky Chant wore off!"))
     end)
     -- One-turn volatiles (Powder / Electrify), matching their duration: 1.
     for _, who in ipairs(activeList(battle)) do

@@ -30,12 +30,6 @@
 --     mon in the swapped position (`pokemon.side.active[newPosition]`) and
 --     fails if that slot is empty or fainted. Singles => gameType 'singles'
 --     => unconditional fail. Nothing else in the block runs.
---   dragoncheer (moves.ts:4057+). target all-allies (PokeAPI: api-full.json
---     DRAGONCHEER.target = "all-allies"). It applies the 'dragoncheer'
---     volatile to its TARGETS; `all-allies` excludes the user, so in
---     singles the set of targets is empty and the move does nothing.
---     (Contrast Helping Hand, which is the same shape but an explicit
---     "ally" singular target.)
 --   followme (moves.ts:6040+). `onTry(source) { return this.activePerHalf
 --     > 1; }` -- i.e. it refuses to execute unless the user's half of the
 --     field holds more than one battler. Singles => activePerHalf 1 =>
@@ -55,6 +49,14 @@
 --     'spotlight' volatile makes a target the centre of opponents'
 --     attention; with no other battler on the user's side there is no
 --     attention to draw and no second target to be centred.
+--
+-- RETIRED (4.6.7): DRAGONCHEER used to sit in this registry (all-allies
+-- excludes the user, so a singles battle has an empty target set). Now that a
+-- scene-driven battle really does have adjacent allies, it is fully reachable
+-- and is implemented instead: combat/modern_crit_override.lua's
+-- GALAR_DRAGONCHEER_EFFECT puts the switch-scoped 'dragoncheer' crit volatile
+-- on the user's adjacent allies (and status_condition_cleanup.lua drops it on
+-- switch-out), so it is removed from this registry.
 --
 -- WHY THESE ARE DISJOINT FROM THE REST OF THE CODEBASE. Every id here is
 -- absent from this mod's move-patch log and from every id-referenced
@@ -87,9 +89,6 @@ return function(mod)
     ALLYSWITCH = "Ally Switch needs a second allied battler to swap with; "
       .. "Showdown's onHit fails outright unless gameType is doubles/triples "
       .. "(moves.ts:302-330).",
-    DRAGONCHEER = "Dragon Cheer targets all-ALLIES (user excluded); with no "
-      .. "allied battler the target set is empty (moves.ts:4057+, national_dex "
-      .. "target all-allies).",
     FOLLOWME = "Follow Me refuses to execute unless activePerHalf > 1 "
       .. "(moves.ts:6040+); with no ally there is also nothing to redirect.",
     HELPINGHAND = "Helping Hand targets an ally (never the user); with no "

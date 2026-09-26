@@ -1,6 +1,7 @@
 -- Dispatch engine for abilities/data/dancer.lua -- see that file's own
 -- header for the real mechanic and its one honest simplification.
 return function(mod, data)
+  local Strings = require("src.core.Strings")
   local nationalDex = mod.find and mod.find("national_dex")
   assert(nationalDex and nationalDex.exports and nationalDex.exports.moveFlags,
     "dancer: national_dex must be loaded first")
@@ -24,7 +25,7 @@ return function(mod, data)
       for _, mon in ipairs(allActiveBattlers(battle) or {}) do
         if mon and mon ~= attacker and (mon.hp or 0) > 0 and data.DANCER
             and abilityIdOf(mon) == "DANCER" then
-          battle:emit({ kind = "message", text = "The DANCE was mirrored!" })
+          battle:emit({ kind = "message", text = Strings("The DANCE was mirrored!") })
           nativeFn(battle, mon, defender, moveId)
         end
       end
@@ -45,7 +46,8 @@ return function(mod, data)
   end
 
   local BattleState = require("src.battle.BattleState")
-  local nativePerformMoveDancer = BattleState.performMove
+  local nativePerformMoveDancer = rawget(BattleState, "performMove")
+  if type(nativePerformMoveDancer) == "function" then
   function BattleState:performMove(user, target, moveInst, isCalled)
     local result = nativePerformMoveDancer(self, user, target, moveInst, isCalled)
     local moveId = moveInst and moveInst.id
@@ -55,6 +57,7 @@ return function(mod, data)
       end, user, target, moveId)
     end
     return result
+  end
   end
 
   mod.log:info("g9-battle-engine: dancer installed (DANCER)")

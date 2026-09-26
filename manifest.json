@@ -1,7 +1,7 @@
 {
   "id": "g9-battle-engine",
   "name": "g9-battle-engine",
-  "version": "4.6.3",
+  "version": "4.7.2",
   "api": 2,
   "entry": "main.lua",
   "profile": "content",
@@ -19,8 +19,7 @@
     "national_dex"
   ],
   "optional_dependencies": [
-    "battle_forms",
-    "g9-gui"
+    "battle_forms"
   ],
   "dependency_sources": {
     "national_dex": "https://github.com/sanjinpepic/gen1recomp-national-dex"

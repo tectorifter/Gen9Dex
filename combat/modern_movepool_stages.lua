@@ -465,6 +465,46 @@ return function(mod)
     return moved
   end
 
+  -- A stat boost applied to the user's OWN SIDE, one recipient at a time.
+  -- Howl is national_dex target "user-and-allies" (real Showdown
+  -- `target: "allies"`, moves.ts:9016 -- the user AND every adjacent
+  -- ally). Coaching is the games' own "all adjacent allies but NOT the
+  -- user" (Bulbapedia, Coaching: "boosts the Attack and Defense of all
+  -- allies (but not the user) ... fails in a Single Battle or when no ally
+  -- is present"); Showdown labels it `adjacentAlly` (one ally, which
+  -- coincides in doubles), but the all-allies-except-self reading is the
+  -- real rule and is what `includeUser = false` gives here. `includeUser`
+  -- defaults to true (the user-and-allies shape).
+  --
+  -- Adjacency is the engine's real N-way seam, so the recipient set is the
+  -- user plus literally-adjacent allies in doubles/triples and the whole
+  -- team in the 4v4/boss/horde layouts -- no per-layout wiring here. Each
+  -- recipient runs through runChanges (messages emit on both
+  -- generations); the move fails only when no recipient's stage moved.
+  local function teamBoostMove(effectId, changes, includeUser)
+    mod.content.move_effects:register(effectId, {
+      kind = "primary",
+      run = function(a, b, c)
+        local n = normalize(a, b, c)
+        local battle = n.battle
+        local recipients = {}
+        if includeUser ~= false then recipients[#recipients + 1] = n.user end
+        local requestAdjacency = mod.exports.requestAdjacency
+        if requestAdjacency then
+          local ok, adj = pcall(requestAdjacency, battle, n.user, nil)
+          if ok and adj and adj.allies then
+            for _, ally in ipairs(adj.allies) do recipients[#recipients + 1] = ally end
+          end
+        end
+        local any = false
+        for _, who in ipairs(recipients) do
+          if runChanges(n, who, changes) then any = true end
+        end
+        if not any then failMsg(n.battle) end
+      end,
+    })
+  end
+
   -- Flat, guaranteed self boosts. Every one is Showdown's `boosts` map on
   -- a Status move; the citation beside each move is its block in moves.ts.
   primary("GMAX_QUIVERDANCE_EFFECT", { -- moves.ts:14539-14543
@@ -487,9 +527,10 @@ return function(mod)
     { self = true, stat = "defense", delta = 1 }, { self = true, stat = "spd", delta = 1 },
   })
   primary("GMAX_SHELTER_EFFECT", { { self = true, stat = "defense", delta = 2 } }) -- moves.ts:16320
-  -- Howl targets user-and-allies (moves.ts:9016) -- in singles that is the
-  -- user alone, so a self +1 Atk is the whole real effect.
-  primary("GMAX_HOWL_EFFECT", { { self = true, stat = "attack", delta = 1 } })
+  -- Howl targets user-and-allies (moves.ts:9016) -- the user AND every
+  -- adjacent ally, so it is a real side-wide boost (in singles that is the
+  -- user alone, which is all the native two-battler fallback reports).
+  teamBoostMove("GMAX_HOWL_EFFECT", { { self = true, stat = "attack", delta = 1 } })
   -- Target-directed drops. primary() sets accuracyChecked for these (a
   -- self buff must not roll against the foe's evasion); applyChange's
   -- fromEnemy rule makes them Mist/Substitute/ability-gated.
@@ -704,6 +745,18 @@ return function(mod)
   sideBoostMove("GMAX_MAGNETICFLUX_EFFECT", {
     { self = true, stat = "defense", delta = 1 }, { self = true, stat = "spd", delta = 1 },
   })
+
+  -- Coaching -- Atk +1 / Def +1 to every adjacent ALLY, never the user
+  -- (Bulbapedia: "boosts the Attack and Defense of all allies (but not
+  -- the user) ... fails in a Single Battle or when no ally is present").
+  -- national_dex's own record (target "user-and-allies", statChanges
+  -- Atk+1/Def+1) is close but imprecise about the user; Showdown's
+  -- `adjacentAlly` is imprecise about the count -- the game's
+  -- all-allies-except-self rule is what this encodes (in doubles the one
+  -- ally, in triples/4v4 the adjacent wing(s)). No ally means it fails.
+  teamBoostMove("GMAX_COACHING_EFFECT", {
+    { self = true, stat = "attack", delta = 1 }, { self = true, stat = "defense", delta = 1 },
+  }, false)
 
   ------------------------------------------------------------------
   -- Geomancy -- a real two-turn charge, then SpA/SpD/Spe +2 each

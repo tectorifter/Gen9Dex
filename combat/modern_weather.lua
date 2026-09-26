@@ -241,7 +241,8 @@ return function(mod)
   -- performMove. The same documented Gen 2 limitation applies (the skip
   -- is Gen 1 only; Gen 2 charges through its own Effects.CHARGE system).
   local SUN_SKIPS_CHARGE = { SOLARBEAM = true, SOLARBLADE = true }
-  local nativePerformMove = BattleState.performMove
+  local nativePerformMove = rawget(BattleState, "performMove")
+  if type(nativePerformMove) == "function" then
   function BattleState:performMove(user, target, moveInst, isCalled)
     -- Mega Sol (Phase 8, other bucket): real text is "can use its moves
     -- AS IF the weather were harsh sunlight" -- broader than just the
@@ -257,6 +258,7 @@ return function(mod)
       user.chargeReady = true
     end
     return nativePerformMove(self, user, target, moveInst, isCalled)
+  end
   end
 
   ------------------------------------------------------------------

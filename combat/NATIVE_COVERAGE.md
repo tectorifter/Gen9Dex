@@ -38,7 +38,7 @@ Of the 670 mod-responsibility moves:
 |---|---|---|
 | referenced | 268 | the id appears in the mod's code or in `CUSTOM_EFFECT_PATCH` — handled by a bespoke handler |
 | generically handled | 191 | no bespoke handler, but a field the mod's generic listeners already consume (`flinchChance`, `ailment`+`ailmentChance`, `confusion`+chance, `statChance`+`statChanges`, `drain`, or a native crit/multihit/turn field) |
-| structural exemptions | 6 | impossible to observe in a single battle — see below |
+| structural exemptions | 5 | impossible to observe in a single battle — see below |
 | (plain damage) | 49 | no handler beyond baseline; the damage pipeline handles them (Aerial Ace, Dragon Claw, X-Scissor, Seed Bomb, ...) |
 | **residual gaps** | **156** | a real Showdown handler exists and nothing in the mod provides it — **the wiring backlog** |
 
@@ -48,7 +48,7 @@ exemptions, then the remainder split into plain damage vs. residual.)
 
 ## Structural exemptions (impossible in singles)
 
-These six have a real mechanic that **needs a second allied battler** and can
+These five have a real mechanic that **needs a second allied battler** and can
 therefore never be observed in a 1-vs-1 fight. They are named in
 `combat/structural_exemptions.lua` (booted by `main.lua` as
 `structural_exemptions`) and exported as
@@ -58,18 +58,45 @@ so the registry can never silently contradict a real implementation.
 
 - **ALLYSWITCH** — Showdown `onHit` fails unless `gameType` is doubles/triples
   (`moves.ts:302-330`).
-- **DRAGONCHEER** — targets `all-allies` (user excluded); empty target set in
-  singles (`moves.ts:4057+`).
 - **FOLLOWME** — `onTry` refuses unless `activePerHalf > 1` (`moves.ts:6040+`).
 - **HELPINGHAND** — target `ally`, never the user (`moves.ts:8574+`).
 - **RAGEPOWDER** — same `activePerHalf > 1` gate as Follow Me (`moves.ts:14599+`).
 - **SPOTLIGHT** — `onTryHit` fails when `activePerHalf === 1` (`moves.ts:17764+`).
 
+**DRAGONCHEER** was retired from this registry in 4.6.7: rather than being
+exempted, it now has a real handler (`GALAR_DRAGONCHEER_EFFECT` in
+`combat/modern_crit_override.lua`) that walks the user's side via
+`mod.exports.requestAdjacency`, so it simply no-ops in singles and works on
+every adjacent ally in doubles+.
+
 Deliberately **not** exempt (they include the user and therefore function in
 singles as ordinary self-boosts, so they are wiring targets, not exemptions):
-**HOWL, GEARUP, MAGNETICFLUX** (each targets `user-and-allies`), and the
+**HOWL, GEARUP, MAGNETICFLUX** (each targets `user-and-allies`; all three are
+now wired as of 4.6.7 via the `requestAdjacency` seam), and the
 doubles-flavoured guard family **WIDEGUARD, QUICKGUARD, CRAFTYSHIELD,
 MATBLOCK, SAFEGUARD** (each protects the user's own side, which is the user).
+
+**Ally-targeting moves (4.6.8).** The rule that decides which moves a battle
+scene's target picker may offer an adjacent ally for is
+`combat/move_targeting.lua`'s `isAllyTargetable`: the `ally` / `user-or-ally`
+archetypes, the selected-pokemon HEAL records, and -- as of 4.6.8 -- **every
+other non-damaging selected-pokemon move** (national_dex's
+`damageClass == "status"`), so Transform, Thunder Wave, Toxic, Trick, Skill Swap
+and Instruct can be aimed at a teammate while a variable-power damaging move
+(Seismic Toss) stays foe-only. A new `isAllyOnlyMove` marks the moves whose only
+legal recipient is an ally (HELPINGHAND, AROMATICMIST, ACUPRESSURE, HEALPULSE,
+FLORALHEALING): the scene offers **no foe** for one of these, and in singles (no
+ally) the move is used and fails rather than being applied to the lone enemy --
+which is why HELPINGHAND above remains a singles-impossible exemption.
+**POLLENPUFF is deliberately excluded** even though a damaging move can target
+an ally in Showdown: its ally half (the 50% heal) is still a structural no-op
+here (see `MISSING_EFFECTS_PLAN.md` phase 21), so offering an ally would run the
+native DAMAGE path on that ally. It stays foe-only until that half is wired.
+Imposter's own position rule is real as of 4.6.8: `mod.exports.requestOpposite`
+(forwards to a scene's `g9.request_opposite` hook, native two-battler fallback)
+answers "the foe directly opposite this slot", and `combat/modern_transform.lua`'s
+IMPOSTER branch transforms only into that mon and does **nothing** when the slot
+is empty -- never a different foe, never an ally.
 
 ## Residual-gap inventory → wiring phases
 
@@ -243,4 +270,4 @@ present in the codebase).
    non-baseline Showdown key that is neither referenced, generic, exempt, nor
    plainly-damaging.
 5. Re-run the fengari harness (round 81) — it asserts the exemption registry
-   boots, names the six ids, and stays disjoint from the move-patch log.
+   boots, names the five ids, and stays disjoint from the move-patch log.

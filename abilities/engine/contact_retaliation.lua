@@ -1,6 +1,7 @@
 -- Dispatch engine for abilities/data/contact_retaliation.lua -- Phase 8c
 -- of the ability roadmap ("other" bucket).
 return function(mod, data)
+  local Strings = require("src.core.Strings")
   local nationalDex = mod.find and mod.find("national_dex")
   assert(nationalDex and nationalDex.exports and nationalDex.exports.moveFlags
       and nationalDex.exports.moveById,
@@ -73,7 +74,7 @@ return function(mod, data)
     local battle = ev.battle
     if battle then
       battle:emit({ kind = "message",
-        text = battle:monName(user) .. " sucked up the ooze!" })
+        text = Strings("%s sucked up the ooze!", battle:monName(user)) })
     end
   end)
 

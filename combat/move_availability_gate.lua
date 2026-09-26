@@ -32,6 +32,7 @@
 -- safe choice, never a behavior change if the guard turns out to be a
 -- no-op there.
 return function(mod, isMoveUsable)
+  local Strings = require("src.core.Strings")
   local BattleState = require("src.battle.BattleState")
   if not BattleState.__galarMoveGateWrapped then
     BattleState.__galarMoveGateWrapped = true
@@ -44,7 +45,7 @@ return function(mod, isMoveUsable)
         if mv and mv.id and (mv.pp or 0) > 0
             and self.player.disabledSlot ~= self.moveIndex
             and not isMoveUsable(mv.id) then
-          self:say("This move isn't\nready to use yet!")
+          self:say(Strings("This move isn't\nready to use yet!"))
           self.phase = "messages"
           self.afterQueue = "menu"
           return
@@ -64,7 +65,7 @@ return function(mod, isMoveUsable)
         local moves = self.playerMoves and self:playerMoves()
         local mv = moves and moves[self.moveIndex]
         if mv and mv.id and (mv.pp or 0) > 0 and not isMoveUsable(mv.id) then
-          self:refuseMove("This move isn't\nready to use yet!")
+          self:refuseMove(Strings("This move isn't\nready to use yet!"))
           return
         end
       end

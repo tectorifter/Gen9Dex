@@ -72,6 +72,11 @@ return function(mod)
     -- combat/modern_crit_override.lua (round 71): Laser Focus's guaranteed-crit
     -- volatile. A switch-out must clear it (the real volatile is switch-scoped).
     "laserFocusTurns",
+    -- combat/modern_crit_override.lua (4.6.7): Dragon Cheer's
+    -- ally-side crit volatile and its frozen Dragon-type flag. Both are
+    -- switch-scoped in the real games (dropped by clearVolatile), so a mon
+    -- that leaves the field must come back un-cheered.
+    "dragonCheer", "dragonCheerDragon",
     -- combat/modern_trap_moves.lua (round 77, missing-effects phase 9): the
     -- Octolock coat. Its own battle.turn_ended listener ends it when the
     -- source leaves the field, but a target that SWITCHES OUT must also come

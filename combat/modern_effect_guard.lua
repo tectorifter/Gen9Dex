@@ -278,9 +278,19 @@ return function(mod)
   -- seam. `self.data.move_effects` is the merged registry view, so a
   -- record any mod contributed is guarded too.
   ------------------------------------------------------------------
-  local nativeEffectRecord = BattleState.effectRecord
-  assert(type(nativeEffectRecord) == "function",
-    "modern_effect_guard: BattleState.effectRecord missing")
+  local nativeEffectRecord = BattleState and rawget(BattleState, "effectRecord")
+  if type(nativeEffectRecord) ~= "function" then
+    -- Gen 2: the engine resolves `src.battle.BattleState` to its Gen-2
+    -- facade, which has no effectRecord (Gold owns move_effects dispatch via
+    -- Battle.moveEffectRecordFor, not BattleState:effectRecord). This guard
+    -- is the Gen-1 crash shield, so a Gen-2 boot simply has nothing to
+    -- install -- a clean skip, not a guarded failure (round 349).
+    mod.exports.effectGuardInstalled = false
+    mod.log:info("g9-battle-engine: modern_effect_guard skipped -- the live "
+      .. "src.battle.BattleState has no effectRecord (Gen-2 facade); the "
+      .. "record-run guard covers Gen-1 dispatch only")
+    return
+  end
   function BattleState:effectRecord(effect)
     return protectMoveEffectRecord(nativeEffectRecord(self, effect), effect)
   end

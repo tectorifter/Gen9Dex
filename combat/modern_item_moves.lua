@@ -428,7 +428,7 @@ return function(mod)
       elseif moveId == "PLASMAFISTS" then
         if (battle.ionDelugeTurns or 0) <= 0 then
           battle.ionDelugeTurns = 1
-          say(battle, "A deluge of ions showers the battlefield!")
+          say(battle, Strings("A deluge of ions showers the battlefield!"))
         end
 
       elseif moveId == "FLAMEBURST" then

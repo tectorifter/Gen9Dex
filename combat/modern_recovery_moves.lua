@@ -109,7 +109,7 @@ return function(mod)
         return { romText(n.battle.data, "_ButItFailedText", "But, it failed!") }
       end
       n.user.aquaRing = true
-      return { Strings("%s\ncovered itself\nwith water!", "") }
+      return { Strings("%s\ncovered itself\nwith water!", displayNameFor(n.battle, n.user, n.gen2)) }
     end,
   })
 

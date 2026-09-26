@@ -107,6 +107,17 @@ lives — the exemption set disjoint from every patched move). The audit also
 produced the residual-gap inventory below, which becomes phases 13-23.
 132/132 subsystems, 0 failures; manifest 2.4.5 → 2.4.6.
 
+**Update (4.6.7).** The registry is now five moves. **DRAGONCHEER** was
+retired from the exemption set and given a real handler
+(`GALAR_DRAGONCHEER_EFFECT`, `combat/modern_crit_override.lua`) that walks the
+user's side via `mod.exports.requestAdjacency` — it no-ops in singles and
+grants the switch-scoped `dragonCheer` crit bonus to every adjacent ally in
+doubles+. The same seam was wired for the other ally-side support moves
+(**LIFEDEW, LUNARBLESSING, HOWL, COACHING** — see `NATIVE_COVERAGE.md` and the
+4.6.7 notes in `README.md`), so `structural_exemptions.lua` now contains
+exactly **ALLYSWITCH, FOLLOWME, HELPINGHAND, RAGEPOWDER, SPOTLIGHT** (size
+pinned at 5).
+
 **Residual backlog note:** the 156 moves the audit could not attribute to a
 handler belong to phases 13-23 below. They were NOT in the original phase
 list (which stopped at 12); the new sections were added in this round so the
@@ -1678,7 +1689,12 @@ the plan above:
    an ALLY heal (`moves.ts:13563-13586`, `if (source.isAlly(target))`); this
    engine's default format is 1-vs-1, where a target is never an ally, so the
    heal has no reachable trigger -- the same structural no-op class as Flame
-   Burst's ally splash in phase 19. Nothing was repointed for either.
+   Burst's ally splash in phase 19. Nothing was repointed for either. (4.6.8
+   update: the battle scene's target picker now offers allies for non-damaging
+   selected-pokemon moves and offers NO foe for ally-only ones, but POLLENPUFF
+   is deliberately kept foe-only -- see `NATIVE_COVERAGE.md`'s ally-targeting
+   note -- precisely so this unwired ally half can never run the native damage
+   path on a teammate.)
 2. **Spite and Eerie Spell share one PP-drain rule** -- Showdown's
    `Pokemon#deductPP` (`pokemon.ts:888-900`): subtract up to N, clamp at 0,
    RETURN the amount actually removed (0 = the move fails). Spite is a

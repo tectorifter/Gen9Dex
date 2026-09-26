@@ -14,6 +14,7 @@
 -- for the real once-per-switch-in limit national_dex's own Protean/Libero
 -- notes both call out explicitly.
 return function(mod, data)
+  local Strings = require("src.core.Strings")
   local gen2BattleOk, Battle = pcall(require, "src.battle.gen2.Battle")
   Battle = gen2BattleOk and Battle or nil
   local abilityIdOf = mod.exports.abilityIdOf
@@ -36,7 +37,7 @@ return function(mod, data)
             markUsed(self, attacker)
             setMonTypes(self, attacker, { moveType })
             self:emit({ kind = "message",
-              text = self:monName(attacker) .. " transformed into the " .. moveType .. " type!" })
+              text = Strings("%s transformed into the %s type!", self:monName(attacker), moveType) })
           end
         end
       end

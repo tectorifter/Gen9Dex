@@ -397,7 +397,7 @@ return function(mod)
       return nativeUseMove(self, attacker, defender, moveId)
     end
     local msg = (reason == "focus")
-      and (nameOf(self, attacker) .. " lost its focus and couldn't move!")
+      and (Strings("%s lost its focus and couldn't move!", nameOf(self, attacker)))
       or Strings("But it failed!")
     local prevRecordFor = Battle.moveEffectRecordFor
     Battle.moveEffectRecordFor = function(data, effect)
